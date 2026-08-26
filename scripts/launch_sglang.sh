@@ -5,7 +5,7 @@ NUM_GPUS=${NUM_GPUS:-8}
 TP=${TP:-1}
 ULYSSES=${ULYSSES:-8}
 ENCODER_PARALLEL=${ENCODER_PARALLEL:-auto}
-CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/default_model}
+CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/MiniMax-H3}
 MODEL_VARIANT=${MODEL_VARIANT:-fl2va}
 SGLANG_HOST=${SGLANG_HOST:-0.0.0.0}
 SGLANG_PORT=${SGLANG_PORT:-30020}
@@ -17,10 +17,11 @@ if [[ ${NUM_GPUS} != 8 || ${TP} != 1 || ${ULYSSES} != 8 ]]; then
   exit 1
 fi
 
-# Merlin materializes the HDFS MODEL_PATH into default_model before starting
-# the workload. MODEL remains an explicit override; a local MODEL_PATH is also
-# accepted for non-CSDE environments. The hdfs:// value itself is deliberately
-# not passed to SGLang because --model-path expects a local directory or repo ID.
+# The Bernard entrypoint localizes the HDFS MODEL_PATH into a directory whose
+# name retains the MiniMax-H3 identity. MODEL remains an explicit override; a
+# local MODEL_PATH is also accepted for non-CSDE environments. The hdfs:// value
+# itself is deliberately not passed to SGLang because --model-path expects a
+# local directory or repo ID.
 if [[ -z ${MODEL:-} ]]; then
   if [[ -n ${MODEL_PATH:-} && -d ${MODEL_PATH:-} ]]; then
     MODEL=${MODEL_PATH}
@@ -32,6 +33,13 @@ if [[ -z ${MODEL:-} ]]; then
 fi
 
 if [[ ${MODEL} == /* ]]; then
+  model_identity=${MODEL,,}
+  model_identity=${model_identity//-/}
+  model_identity=${model_identity//_/}
+  if [[ ${model_identity} != *minimaxh3* ]]; then
+    echo "local model path must retain the MiniMax-H3 identity for SGLang native pipeline resolution: ${MODEL}" >&2
+    exit 1
+  fi
   required_model_entries=(
     modular_model_index.json
     FL2VA
@@ -91,9 +99,8 @@ cd /sgl-workspace/sglang
 
 args=(
   sglang serve
-  # The CSDE-localized directory is named default_model, so SGLang cannot
-  # infer the registered MiniMax-H3 family from the path.  Force the official
-  # multimodal/diffusion dispatcher instead of falling back to the LLM parser.
+  # Keep an explicit top-level dispatcher guard in addition to the named model
+  # directory so local deployment changes cannot fall back to the LLM parser.
   --model-type diffusion
   --model-path "${MODEL}"
   --model-variant "${MODEL_VARIANT}"

@@ -33,7 +33,7 @@
 docker build -f docker/Dockerfile.bernard -t minimax-h3-h20-bernard:20260826-v1 .
 ```
 
-目标服务保留 `MODEL_PATH=hdfs://...`。Bernard 镜像从当前 CSDE 工具镜像的固定 digest 复制 `/opt/tiger/hdfs_client`，不依赖 Pod 运行时 SCM 挂载。启动器会优先复用完整的 `/opt/tiger/csde/default_model`；新 Pod 没有该目录时会从 HDFS 下载到临时目录，校验 `modular_model_index.json`、FL2VA、Transformer、VAE、文本编码器、Tokenizer 等关键文件后再原子切换。显式设置的本地 `MODEL` / `MODEL_PATH` 仍可覆盖自动选择；HDFS client 缺失或目录不完整时会直接退出，不会静默回退到在线基模。
+目标服务保留 `MODEL_PATH=hdfs://...`。Bernard 镜像从当前 CSDE 工具镜像的固定 digest 复制 `/opt/tiger/hdfs_client`，不依赖 Pod 运行时 SCM 挂载。每个新 Pod 从 HDFS 下载到 `/opt/tiger/csde/MiniMax-H3.partial`，校验 `modular_model_index.json`、FL2VA、Transformer、VAE、文本编码器、Tokenizer 等关键文件后再原子切换为 `/opt/tiger/csde/MiniMax-H3`。目录名刻意保留真实模型身份，使 SGLang 直接命中原生 `MiniMaxH3Pipeline`；构建阶段也会对该注册结果做断言。显式设置的本地 `MODEL` / `MODEL_PATH` 仍可覆盖自动选择，但路径同样必须包含 MiniMax-H3 身份；HDFS client 缺失或目录不完整时会直接退出，不会静默回退到在线基模。
 
 Bernard 镜像在构建阶段下载并按固定 revision、大小和 SHA256 校验 Turbo LoRA，运行时通过 `LORA_LOCAL_PATH` 只读取镜像内缓存，不依赖 Pod 公网访问。
 
@@ -260,7 +260,7 @@ Content-Type: application/json
 
 如果 SGLang 上游代码结构变化，构建阶段会因短边补丁不匹配而失败，不会静默启动一个只支持 768 的服务。
 
-Merlin/CSDE 将 MiniMax H3 落盘为通用目录名 `default_model`，SGLang 无法从这个本地路径自动判断模型家族，因此启动器固定传入官方 `--model-type diffusion`，确保请求由多模态生成服务解析器处理而不是回退到 LLM 服务。MiniMax H3 的 DiT attention backend 在第一次 forward 时延迟解析。`ATTENTION_BACKEND=sol_attn` 在这里是优化 profile 标识；实际后端通过组件映射把 transformer 指向 Sol，并将 `text_encoder`、`audio_vae`、`video_vae` 显式覆盖为兼容后端；启动脚本会同时检查 DiT 实际解析为 Sol 和 Audio VAE 保持 FA，任一不满足都会退出。
+Bernard 将 MiniMax H3 落盘为显式命名的 `/opt/tiger/csde/MiniMax-H3`，由 SGLang 注册表解析为原生 `MiniMaxH3Pipeline`；启动器同时固定传入官方 `--model-type diffusion`，防止顶层分流回退到 LLM 服务。MiniMax H3 的 DiT attention backend 在第一次 forward 时延迟解析。`ATTENTION_BACKEND=sol_attn` 在这里是优化 profile 标识；实际后端通过组件映射把 transformer 指向 Sol，并将 `text_encoder`、`audio_vae`、`video_vae` 显式覆盖为兼容后端；启动脚本会同时检查 DiT 实际解析为 Sol 和 Audio VAE 保持 FA，任一不满足都会退出。
 
 SageAttention 会改变 transformer 的 attention 数值路径。需要让所有组件回退到 FlashAttention 时清空组件覆盖后重新执行安装：
 

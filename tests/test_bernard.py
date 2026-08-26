@@ -23,7 +23,9 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     assert "QUANTIZATION=fp8" in dockerfile
     assert "SGLANG_CACHE_DIT_ENABLED=true" in dockerfile
     assert 'MODEL=""' in dockerfile
-    assert "CSDE_MODEL_ROOT=/opt/tiger/csde/default_model" in dockerfile
+    assert "CSDE_MODEL_ROOT=/opt/tiger/csde/MiniMax-H3" in dockerfile
+    assert 'resolved == "MiniMaxH3Pipeline"' in dockerfile
+    assert "default_model" not in dockerfile
     assert "LORA_LOCAL_PATH=/cache/huggingface" in dockerfile
     assert "download_lora.py" in dockerfile
     assert "LORA_SHA256" in dockerfile
@@ -43,6 +45,9 @@ def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
     assert 'HDFS_BIN=${HDFS_BIN:-/opt/tiger/hdfs_client/bin/hdfs}' in entrypoint
     assert '"${HDFS_BIN}" get -s -c 128 --ct 32 -t 8' in entrypoint
     assert "Refusing to manage unsafe CSDE_MODEL_ROOT" in entrypoint
+    assert "model_path_identifies_minimax_h3" in entrypoint
+    assert "CSDE_MODEL_ROOT must retain the MiniMax-H3 model identity" in entrypoint
+    assert "default_model" not in entrypoint
     assert "model_is_complete" in entrypoint
     assert "prepare_model" in entrypoint
     assert "/opt/minimax-h3/bin/launch_sglang.sh" in entrypoint
@@ -70,7 +75,7 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
 def test_shared_launcher_reuses_the_csde_localized_model():
     launcher = (ROOT / "scripts/launch_sglang.sh").read_text()
 
-    assert "CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/default_model}" in launcher
+    assert "CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/MiniMax-H3}" in launcher
     assert "-n ${MODEL_PATH:-} && -d ${MODEL_PATH:-}" in launcher
     assert "MODEL=${CSDE_MODEL_ROOT}" in launcher
     assert "MODEL=MiniMaxAI/MiniMax-H3" in launcher
@@ -87,6 +92,8 @@ def test_shared_launcher_reuses_the_csde_localized_model():
     ):
         assert required_entry in launcher
     assert "local MiniMax H3 model is incomplete" in launcher
+    assert "local model path must retain the MiniMax-H3 identity" in launcher
+    assert "default_model" not in launcher
 
 
 def test_shared_launcher_forces_the_multimodal_dispatcher_for_local_model():

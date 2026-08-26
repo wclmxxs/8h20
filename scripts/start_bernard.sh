@@ -5,7 +5,7 @@ API_PORT=${PORT:-${TCE_SERVICE_PORT:-30010}}
 SGLANG_PORT=${SGLANG_PORT:-30020}
 STARTUP_TIMEOUT_SECONDS=${STARTUP_TIMEOUT_SECONDS:-1800}
 DATA_ROOT=${DATA_ROOT:-/opt/tiger/minimax-h3/data}
-CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/default_model}
+CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/MiniMax-H3}
 HDFS_BIN=${HDFS_BIN:-/opt/tiger/hdfs_client/bin/hdfs}
 
 required_model_entries=(
@@ -27,6 +27,13 @@ model_is_complete() {
   for entry in "${required_model_entries[@]}"; do
     [[ -e ${root}/${entry} ]] || return 1
   done
+}
+
+model_path_identifies_minimax_h3() {
+  local identity=${1,,}
+  identity=${identity//-/}
+  identity=${identity//_/}
+  [[ ${identity} == *minimaxh3* ]]
 }
 
 prepare_model() {
@@ -57,6 +64,10 @@ prepare_model() {
   fi
   if [[ ${MODEL_PATH:-} != hdfs://* ]]; then
     echo "No complete local model and MODEL_PATH is not an HDFS URI" >&2
+    exit 1
+  fi
+  if ! model_path_identifies_minimax_h3 "${CSDE_MODEL_ROOT}"; then
+    echo "CSDE_MODEL_ROOT must retain the MiniMax-H3 model identity: ${CSDE_MODEL_ROOT}" >&2
     exit 1
   fi
   if [[ ! -x ${HDFS_BIN} ]]; then

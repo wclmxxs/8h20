@@ -33,6 +33,8 @@ RUN cd /sgl-workspace/sglang \
        done \
     && rm /tmp/minimax-h3-*.patch
 
+RUN python3 -c 'from sglang.multimodal_gen.registry import get_non_diffusers_pipeline_name; path="/opt/tiger/csde/MiniMax-H3"; resolved=get_non_diffusers_pipeline_name(path); assert resolved == "MiniMaxH3Pipeline", (path, resolved)'
+
 RUN TORCH_CUDA_ARCH_LIST=9.0 python3 -m pip install \
       --no-cache-dir --no-deps --force-reinstall --no-build-isolation \
       "git+https://github.com/thu-ml/SageAttention.git@${SAGEATTENTION_REVISION}" \
@@ -71,7 +73,7 @@ ENV OPTIMIZATION_STACK_ENABLED=1 \
     ULYSSES=8 \
     ENCODER_PARALLEL=auto \
     MODEL="" \
-    CSDE_MODEL_ROOT=/opt/tiger/csde/default_model \
+    CSDE_MODEL_ROOT=/opt/tiger/csde/MiniMax-H3 \
     MODEL_VARIANT=fl2va \
     ATTENTION_BACKEND=sol_attn \
     COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn \
