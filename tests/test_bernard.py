@@ -7,6 +7,8 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     dockerfile = (ROOT / "docker/Dockerfile.bernard").read_text()
 
     assert "nightly-dev-20260812-c7c03ec5@sha256:d7538b2" in dockerfile
+    assert "CSDE_TOOLING_IMAGE=aliyun-sin-hub.byted.org/base/csde@sha256:8b5d467" in dockerfile
+    assert "COPY --from=csde-tooling /opt/tiger/hdfs_client /opt/tiger/hdfs_client" in dockerfile
     assert "SGLANG_EXPECTED_COMMIT=c7c03ec53b" in dockerfile
     for patch in (
         "minimax-h3-short-edge.patch",

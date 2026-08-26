@@ -1,4 +1,6 @@
+ARG CSDE_TOOLING_IMAGE=aliyun-sin-hub.byted.org/base/csde@sha256:8b5d467078d56b072891cb73c771f8202aeea96f8d81a59f283cd00d776f7564
 ARG SGLANG_BASE_IMAGE=lmsysorg/sglang:nightly-dev-20260812-c7c03ec5@sha256:d7538b2bae8aff4b00b826442f7abd69d45ded936bc16fd0a493a2466df52050
+FROM ${CSDE_TOOLING_IMAGE} AS csde-tooling
 FROM ${SGLANG_BASE_IMAGE}
 
 ARG SGLANG_EXPECTED_COMMIT=c7c03ec53b
@@ -39,6 +41,7 @@ RUN TORCH_CUDA_ARCH_LIST=9.0 python3 -m pip install \
     && python3 -c 'import cache_dit, sageattention, sol_attn; print(cache_dit.__file__, sageattention.__file__, sol_attn.__file__)'
 
 WORKDIR /opt/minimax-h3
+COPY --from=csde-tooling /opt/tiger/hdfs_client /opt/tiger/hdfs_client
 COPY api/requirements.txt /opt/minimax-h3/api/requirements.txt
 RUN python3 -m venv --system-site-packages /opt/minimax-h3/api-venv \
     && /opt/minimax-h3/api-venv/bin/pip install --no-cache-dir \

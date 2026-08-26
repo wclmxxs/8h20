@@ -33,7 +33,7 @@
 docker build -f docker/Dockerfile.bernard -t minimax-h3-h20-bernard:20260826-v1 .
 ```
 
-目标服务保留 `MODEL_PATH=hdfs://...`，并挂载 `data/inf/hdfs_client` 到 `/opt/tiger/hdfs_client`。启动器会优先复用完整的 `/opt/tiger/csde/default_model`；新 Pod 没有该目录时会从 HDFS 下载到临时目录，校验 `modular_model_index.json`、FL2VA、Transformer、VAE、文本编码器、Tokenizer 等关键文件后再原子切换。显式设置的本地 `MODEL` / `MODEL_PATH` 仍可覆盖自动选择；HDFS client 缺失或目录不完整时会直接退出，不会静默回退到在线基模。
+目标服务保留 `MODEL_PATH=hdfs://...`。Bernard 镜像从当前 CSDE 工具镜像的固定 digest 复制 `/opt/tiger/hdfs_client`，不依赖 Pod 运行时 SCM 挂载。启动器会优先复用完整的 `/opt/tiger/csde/default_model`；新 Pod 没有该目录时会从 HDFS 下载到临时目录，校验 `modular_model_index.json`、FL2VA、Transformer、VAE、文本编码器、Tokenizer 等关键文件后再原子切换。显式设置的本地 `MODEL` / `MODEL_PATH` 仍可覆盖自动选择；HDFS client 缺失或目录不完整时会直接退出，不会静默回退到在线基模。
 
 Bernard 镜像在构建阶段下载并按固定 revision、大小和 SHA256 校验 Turbo LoRA，运行时通过 `LORA_LOCAL_PATH` 只读取镜像内缓存，不依赖 Pod 公网访问。
 
