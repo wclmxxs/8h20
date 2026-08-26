@@ -47,7 +47,10 @@ COPY --from=csde-tooling /opt/tiger/hdfs_client /opt/tiger/hdfs_client
 COPY api/requirements.txt /opt/minimax-h3/api/requirements.txt
 RUN python3 -m venv --system-site-packages /opt/minimax-h3/api-venv \
     && /opt/minimax-h3/api-venv/bin/pip install --no-cache-dir \
-      -r /opt/minimax-h3/api/requirements.txt
+      -r /opt/minimax-h3/api/requirements.txt \
+    && /opt/minimax-h3/api-venv/bin/python -c \
+      'import fastapi, httpx, pydantic, uvicorn; print(fastapi.__version__, uvicorn.__version__)' \
+    && /opt/minimax-h3/api-venv/bin/python -m uvicorn --version
 COPY api/app /opt/minimax-h3/api/app
 COPY scripts/download_lora.py /opt/minimax-h3/bin/download_lora.py
 COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh

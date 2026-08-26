@@ -166,7 +166,7 @@ if ! curl -fsS "http://127.0.0.1:${SGLANG_PORT}/health" >/dev/null; then
   exit 1
 fi
 
-/opt/minimax-h3/api-venv/bin/uvicorn app.server:app \
+/opt/minimax-h3/api-venv/bin/python -m uvicorn app.server:app \
   --host 0.0.0.0 \
   --port "${API_PORT}" \
   --workers 1 \

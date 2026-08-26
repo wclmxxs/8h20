@@ -51,8 +51,16 @@ def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
     assert "model_is_complete" in entrypoint
     assert "prepare_model" in entrypoint
     assert "/opt/minimax-h3/bin/launch_sglang.sh" in entrypoint
-    assert "/opt/minimax-h3/api-venv/bin/uvicorn app.server:app" in entrypoint
+    assert "/opt/minimax-h3/api-venv/bin/python -m uvicorn app.server:app" in entrypoint
+    assert "/opt/minimax-h3/api-venv/bin/uvicorn app.server:app" not in entrypoint
     assert "wait -n" in entrypoint
+
+
+def test_bernard_image_verifies_the_api_module_entrypoint():
+    dockerfile = (ROOT / "docker/Dockerfile.bernard").read_text()
+
+    assert "import fastapi, httpx, pydantic, uvicorn" in dockerfile
+    assert "/opt/minimax-h3/api-venv/bin/python -m uvicorn --version" in dockerfile
 
 
 def test_shared_launcher_keeps_the_complete_optimization_stack():
