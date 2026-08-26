@@ -33,9 +33,9 @@
 docker build -f docker/Dockerfile.bernard -t minimax-h3-h20-bernard:20260826-v1 .
 ```
 
-目标服务保留 `MODEL_PATH=hdfs://...` 后，CSDE 会把基模物化到 `/opt/tiger/csde/default_model`。启动器现在会自动优先复用该目录，并检查 `modular_model_index.json`、FL2VA、Transformer、VAE、文本编码器、Tokenizer 等关键文件；目录不完整时会直接退出，不会回退到在线下载。显式设置 `MODEL` 仍可覆盖自动选择；离开 CSDE 且没有本地目录时才回退到 `MiniMaxAI/MiniMax-H3`。
+目标服务保留 `MODEL_PATH=hdfs://...`，并挂载 `data/inf/hdfs_client` 到 `/opt/tiger/hdfs_client`。启动器会优先复用完整的 `/opt/tiger/csde/default_model`；新 Pod 没有该目录时会从 HDFS 下载到临时目录，校验 `modular_model_index.json`、FL2VA、Transformer、VAE、文本编码器、Tokenizer 等关键文件后再原子切换。显式设置的本地 `MODEL` / `MODEL_PATH` 仍可覆盖自动选择；HDFS client 缺失或目录不完整时会直接退出，不会静默回退到在线基模。
 
-Turbo LoRA 仍由 `LORA_LOCAL_PATH`/`LORA_REPO` 独立管理。如果 LoRA 已由平台下载，应把 `LORA_LOCAL_PATH` 指向包含 `minimax_h3_turbo_v4_step600_ema.safetensors` 的目录；否则需要保证运行环境可以访问 `LORA_REPO`，或将 LoRA 打入镜像/挂载目录。
+Bernard 镜像在构建阶段下载并按固定 revision、大小和 SHA256 校验 Turbo LoRA，运行时通过 `LORA_LOCAL_PATH` 只读取镜像内缓存，不依赖 Pod 公网访问。
 
 Bernard 模式不启动自注册 Reporter、Docker-socket Watchdog 或 cleaner 容器；平台负责实例注册/健康重建，业务 API 仍把视频与任务元数据写到 `DATA_ROOT`。
 

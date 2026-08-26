@@ -4,6 +4,11 @@ FROM ${SGLANG_BASE_IMAGE}
 ARG SGLANG_EXPECTED_COMMIT=c7c03ec53b
 ARG SAGEATTENTION_REVISION=d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4
 ARG SOL_ATTENTION_REVISION=5fe5febdf0f59fee1c0b44a5ce6665df0dabd247
+ARG LORA_REPO=larryvrh/MiniMax-H3-Turbo-Lora
+ARG LORA_REVISION=43a74557ac3f6539db8e0f2a959d03feb7a81480
+ARG LORA_WEIGHT=minimax_h3_turbo_v4_step600_ema.safetensors
+ARG LORA_SHA256=5f3a626cd72c93a8b9318d6760c510bc5092d2ab13aaba1f932c5bab07a416d3
+ARG LORA_SIZE=779849816
 
 COPY patches/minimax-h3-short-edge.patch /tmp/minimax-h3-short-edge.patch
 COPY patches/minimax-h3-request-optimization.patch /tmp/minimax-h3-request-optimization.patch
@@ -39,10 +44,20 @@ RUN python3 -m venv --system-site-packages /opt/minimax-h3/api-venv \
     && /opt/minimax-h3/api-venv/bin/pip install --no-cache-dir \
       -r /opt/minimax-h3/api/requirements.txt
 COPY api/app /opt/minimax-h3/api/app
+COPY scripts/download_lora.py /opt/minimax-h3/bin/download_lora.py
 COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh
 COPY scripts/start_bernard.sh /opt/minimax-h3/bin/start_bernard.sh
 COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh
+RUN /opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/bin/download_lora.py \
+      --cache-root /cache/huggingface \
+      --repo "${LORA_REPO}" \
+      --revision "${LORA_REVISION}" \
+      --filename "${LORA_WEIGHT}" \
+      --sha256 "${LORA_SHA256}" \
+      --size "${LORA_SIZE}" \
+    && test -f "/cache/huggingface/hub/models--larryvrh--MiniMax-H3-Turbo-Lora/snapshots/${LORA_REVISION}/${LORA_WEIGHT}"
 RUN chmod 0755 \
+      /opt/minimax-h3/bin/download_lora.py \
       /opt/minimax-h3/bin/launch_sglang.sh \
       /opt/minimax-h3/bin/start_bernard.sh \
       /opt/tiger/csde/healthcheck.sh
@@ -61,6 +76,9 @@ ENV OPTIMIZATION_STACK_ENABLED=1 \
     SOL_ATTN_STRICT=1 \
     WARMUP_STEPS=3 \
     QUANTIZATION=fp8 \
+    LORA_LOCAL_PATH=/cache/huggingface/hub/models--larryvrh--MiniMax-H3-Turbo-Lora/snapshots/43a74557ac3f6539db8e0f2a959d03feb7a81480 \
+    LORA_REVISION=43a74557ac3f6539db8e0f2a959d03feb7a81480 \
+    LORA_WEIGHT=minimax_h3_turbo_v4_step600_ema.safetensors \
     LORA_MERGE_MODE=dynamic \
     SGLANG_CACHE_DIT_ENABLED=true \
     SGLANG_CACHE_DIT_FN=1 \

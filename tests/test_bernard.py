@@ -22,6 +22,9 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     assert "SGLANG_CACHE_DIT_ENABLED=true" in dockerfile
     assert 'MODEL=""' in dockerfile
     assert "CSDE_MODEL_ROOT=/opt/tiger/csde/default_model" in dockerfile
+    assert "LORA_LOCAL_PATH=/cache/huggingface" in dockerfile
+    assert "download_lora.py" in dockerfile
+    assert "LORA_SHA256" in dockerfile
     assert "COPY api/app /opt/minimax-h3/api/app" in dockerfile
     assert "COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh" in dockerfile
 
@@ -35,6 +38,11 @@ def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
     assert "export TP=1" in entrypoint
     assert "export ULYSSES=8" in entrypoint
     assert "GPU_INDEXES=0,1,2,3,4,5,6,7" in entrypoint
+    assert 'HDFS_BIN=${HDFS_BIN:-/opt/tiger/hdfs_client/bin/hdfs}' in entrypoint
+    assert '"${HDFS_BIN}" get -s -c 128 --ct 32 -t 8' in entrypoint
+    assert "Refusing to manage unsafe CSDE_MODEL_ROOT" in entrypoint
+    assert "model_is_complete" in entrypoint
+    assert "prepare_model" in entrypoint
     assert "/opt/minimax-h3/bin/launch_sglang.sh" in entrypoint
     assert "/opt/minimax-h3/api-venv/bin/uvicorn app.server:app" in entrypoint
     assert "wait -n" in entrypoint
