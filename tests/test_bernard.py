@@ -20,6 +20,8 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     assert "COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa" in dockerfile
     assert "QUANTIZATION=fp8" in dockerfile
     assert "SGLANG_CACHE_DIT_ENABLED=true" in dockerfile
+    assert 'MODEL=""' in dockerfile
+    assert "CSDE_MODEL_ROOT=/opt/tiger/csde/default_model" in dockerfile
     assert "COPY api/app /opt/minimax-h3/api/app" in dockerfile
     assert "COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh" in dockerfile
 
@@ -51,3 +53,25 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
     assert "SOL_CACHE_DIT_RDT:-0.12" in launcher
     assert "--attention-backend-config" in launcher
     assert "--warmup-resolutions" in launcher
+
+
+def test_shared_launcher_reuses_the_csde_localized_model():
+    launcher = (ROOT / "scripts/launch_sglang.sh").read_text()
+
+    assert "CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/default_model}" in launcher
+    assert "-n ${MODEL_PATH:-} && -d ${MODEL_PATH:-}" in launcher
+    assert "MODEL=${CSDE_MODEL_ROOT}" in launcher
+    assert "MODEL=MiniMaxAI/MiniMax-H3" in launcher
+    for required_entry in (
+        "modular_model_index.json",
+        "FL2VA",
+        "audio_vae",
+        "processor",
+        "scheduler",
+        "text_encoder",
+        "tokenizer",
+        "transformer",
+        "vae",
+    ):
+        assert required_entry in launcher
+    assert "local MiniMax H3 model is incomplete" in launcher

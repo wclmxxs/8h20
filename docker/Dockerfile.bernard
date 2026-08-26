@@ -52,7 +52,8 @@ ENV OPTIMIZATION_STACK_ENABLED=1 \
     TP=1 \
     ULYSSES=8 \
     ENCODER_PARALLEL=auto \
-    MODEL=MiniMaxAI/MiniMax-H3 \
+    MODEL="" \
+    CSDE_MODEL_ROOT=/opt/tiger/csde/default_model \
     MODEL_VARIANT=fl2va \
     ATTENTION_BACKEND=sol_attn \
     COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn \

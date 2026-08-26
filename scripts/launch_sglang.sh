@@ -5,7 +5,7 @@ NUM_GPUS=${NUM_GPUS:-8}
 TP=${TP:-1}
 ULYSSES=${ULYSSES:-8}
 ENCODER_PARALLEL=${ENCODER_PARALLEL:-auto}
-MODEL=${MODEL:-MiniMaxAI/MiniMax-H3}
+CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/default_model}
 MODEL_VARIANT=${MODEL_VARIANT:-fl2va}
 SGLANG_HOST=${SGLANG_HOST:-0.0.0.0}
 SGLANG_PORT=${SGLANG_PORT:-30020}
@@ -15,6 +15,41 @@ OPTIMIZATION_STACK_ENABLED=${OPTIMIZATION_STACK_ENABLED:-1}
 if [[ ${NUM_GPUS} != 8 || ${TP} != 1 || ${ULYSSES} != 8 ]]; then
   echo "MiniMax H3 H20 topology must be NUM_GPUS=8, TP=1, ULYSSES=8; got ${NUM_GPUS}/${TP}/${ULYSSES}" >&2
   exit 1
+fi
+
+# Merlin materializes the HDFS MODEL_PATH into default_model before starting
+# the workload. MODEL remains an explicit override; a local MODEL_PATH is also
+# accepted for non-CSDE environments. The hdfs:// value itself is deliberately
+# not passed to SGLang because --model-path expects a local directory or repo ID.
+if [[ -z ${MODEL:-} ]]; then
+  if [[ -n ${MODEL_PATH:-} && -d ${MODEL_PATH:-} ]]; then
+    MODEL=${MODEL_PATH}
+  elif [[ -d ${CSDE_MODEL_ROOT} ]]; then
+    MODEL=${CSDE_MODEL_ROOT}
+  else
+    MODEL=MiniMaxAI/MiniMax-H3
+  fi
+fi
+
+if [[ ${MODEL} == /* ]]; then
+  required_model_entries=(
+    modular_model_index.json
+    FL2VA
+    audio_vae
+    processor
+    scheduler
+    text_encoder
+    tokenizer
+    transformer
+    vae
+  )
+  for entry in "${required_model_entries[@]}"; do
+    if [[ ! -e ${MODEL}/${entry} ]]; then
+      echo "local MiniMax H3 model is incomplete: missing ${MODEL}/${entry}" >&2
+      exit 1
+    fi
+  done
+  echo "Using localized MiniMax H3 model: ${MODEL}"
 fi
 
 if [[ ${OPTIMIZATION_STACK_ENABLED} == 1 ]]; then
