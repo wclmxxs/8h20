@@ -51,6 +51,7 @@ for proc in Path("/proc").iterdir():
         pass
 assert any(
     "sglang serve" in command
+    and "--model-type diffusion" in command
     and "--num-gpus 8" in command
     and "--tp-size 1" in command
     and "--ulysses-degree 8" in command
@@ -59,7 +60,7 @@ assert any(
     and f"--component-attention-backends {os.environ['COMPONENT_ATTENTION_BACKENDS']}"
     in command
     for command in commands
-), "live sglang process is missing the 8-GPU topology, component backends, FP8, or LoRA mode"
+), "live sglang process is missing the diffusion dispatcher, 8-GPU topology, component backends, FP8, or LoRA mode"
 print("optimization imports OK:", sol_attn.__file__, cache_dit.__file__, Fp8Config.get_name())
 PY
 

@@ -91,6 +91,10 @@ cd /sgl-workspace/sglang
 
 args=(
   sglang serve
+  # The CSDE-localized directory is named default_model, so SGLang cannot
+  # infer the registered MiniMax-H3 family from the path.  Force the official
+  # multimodal/diffusion dispatcher instead of falling back to the LLM parser.
+  --model-type diffusion
   --model-path "${MODEL}"
   --model-variant "${MODEL_VARIANT}"
   --num-gpus "${NUM_GPUS}"
@@ -108,11 +112,9 @@ args=(
   --port "${SGLANG_PORT}"
 )
 
-# MiniMax H3 resolves its DiT backend from the component map below.  The
-# top-level `sglang serve --attention-backend` flag belongs to the LLM server
-# parser and deliberately does not accept multimodal aliases such as
-# `sol_attn`/`fa`.  Passing the profile marker through that flag makes the
-# process exit during argparse before the model-specific arguments are loaded.
+# MiniMax H3 resolves its DiT backend from the component map below.  Keep the
+# profile marker out of the top-level backend flag: the model needs different
+# compatible backends for its text encoder, VAEs, and transformer.
 if [[ -n ${COMPONENT_ATTENTION_BACKENDS} ]]; then
   args+=(--component-attention-backends "${COMPONENT_ATTENTION_BACKENDS}")
 fi

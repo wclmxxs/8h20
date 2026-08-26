@@ -114,6 +114,7 @@ def test_sglang_command_uses_shared_eight_gpu_launcher():
     assert '--num-gpus "${NUM_GPUS}"' in launcher
     assert '--tp-size "${TP}"' in launcher
     assert '--ulysses-degree "${ULYSSES}"' in launcher
+    assert "--model-type diffusion" in launcher
     assert "NUM_GPUS=${NUM_GPUS:-8}" in launcher
     assert "TP=${TP:-1}" in launcher
     assert "ULYSSES=${ULYSSES:-8}" in launcher

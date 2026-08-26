@@ -260,7 +260,7 @@ Content-Type: application/json
 
 如果 SGLang 上游代码结构变化，构建阶段会因短边补丁不匹配而失败，不会静默启动一个只支持 768 的服务。
 
-MiniMax H3 的 DiT attention backend 在第一次 forward 时延迟解析。`ATTENTION_BACKEND=sol_attn` 在这里是优化 profile 标识；启动器不会把它传给仅接受 LLM 后端枚举的全局 `sglang serve --attention-backend`。实际后端通过组件映射把 transformer 指向 Sol，并将 `text_encoder`、`audio_vae`、`video_vae` 显式覆盖为兼容后端；启动脚本会同时检查 DiT 实际解析为 Sol 和 Audio VAE 保持 FA，任一不满足都会退出。
+Merlin/CSDE 将 MiniMax H3 落盘为通用目录名 `default_model`，SGLang 无法从这个本地路径自动判断模型家族，因此启动器固定传入官方 `--model-type diffusion`，确保请求由多模态生成服务解析器处理而不是回退到 LLM 服务。MiniMax H3 的 DiT attention backend 在第一次 forward 时延迟解析。`ATTENTION_BACKEND=sol_attn` 在这里是优化 profile 标识；实际后端通过组件映射把 transformer 指向 Sol，并将 `text_encoder`、`audio_vae`、`video_vae` 显式覆盖为兼容后端；启动脚本会同时检查 DiT 实际解析为 Sol 和 Audio VAE 保持 FA，任一不满足都会退出。
 
 SageAttention 会改变 transformer 的 attention 数值路径。需要让所有组件回退到 FlashAttention 时清空组件覆盖后重新执行安装：
 

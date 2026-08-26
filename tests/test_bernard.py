@@ -56,6 +56,7 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
     assert "NUM_GPUS=${NUM_GPUS:-8}" in launcher
     assert "TP=${TP:-1}" in launcher
     assert "ULYSSES=${ULYSSES:-8}" in launcher
+    assert "--model-type diffusion" in launcher
     assert "transformer=sol_attn" in launcher
     assert 'args+=(--attention-backend "${ATTENTION_BACKEND}")' not in launcher
     assert "SOL_QUANTIZATION:-fp8" in launcher
@@ -86,3 +87,13 @@ def test_shared_launcher_reuses_the_csde_localized_model():
     ):
         assert required_entry in launcher
     assert "local MiniMax H3 model is incomplete" in launcher
+
+
+def test_shared_launcher_forces_the_multimodal_dispatcher_for_local_model():
+    launcher = (ROOT / "scripts/launch_sglang.sh").read_text()
+
+    assert "sglang serve" in launcher
+    assert "--model-type diffusion" in launcher
+    assert launcher.index("--model-type diffusion") < launcher.index(
+        '--model-path "${MODEL}"'
+    )

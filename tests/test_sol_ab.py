@@ -63,6 +63,7 @@ def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():
     assert 'required_env LORA_MERGE_MODE "${SOL_LORA_MERGE_MODE}"' in script
     assert 'required_env SGLANG_CACHE_DIT_ENABLED "${SOL_CACHE_DIT_ENABLED}"' in script
     assert 'required_env NUM_GPUS "8"' in script
+    assert '"--model-type diffusion" in command' in script
     assert '"--num-gpus 8" in command' in script
     assert '"--tp-size 1" in command' in script
     assert '"--ulysses-degree 8" in command' in script
