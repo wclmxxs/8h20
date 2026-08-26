@@ -64,13 +64,15 @@ def test_bernard_image_verifies_the_api_module_entrypoint():
     assert "/opt/minimax-h3/api-venv/bin/python -m uvicorn --version" in dockerfile
 
 
-def test_bernard_api_runner_uses_separate_ipv4_and_ipv6_listeners():
+def test_bernard_api_runner_supports_direct_dual_stack_and_mesh_ingress():
     runner = (ROOT / "api/run_dual_stack.py").read_text()
 
     assert "socket.AF_INET" in runner
     assert "socket.AF_INET6" in runner
     assert "socket.IPV6_V6ONLY, 1" in runner
-    assert 'ipv4.bind(("0.0.0.0", port))' in runner
+    assert 'ipv4_host = "127.0.0.1" if mesh_ingress else "0.0.0.0"' in runner
+    assert "REQUIRE_HTTP_MESH" in runner
+    assert "MESH_INGRESS_PORT" in runner
     assert 'ipv6.bind(("::", actual_port))' in runner
     assert "PUBLIC_ADVERTISE_IP" in runner
     assert 'f"http://{host}:{port}"' in runner

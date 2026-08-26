@@ -4,7 +4,6 @@ import importlib.util
 import socket
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).resolve().parents[1] / "api/run_dual_stack.py"
 SPEC = importlib.util.spec_from_file_location("run_dual_stack", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
@@ -26,6 +25,31 @@ def test_create_listeners_binds_ipv4_and_ipv6_to_the_same_port():
     finally:
         for listener in listeners:
             listener.close()
+
+
+def test_create_listeners_uses_loopback_behind_http_mesh():
+    listeners = MODULE.create_listeners(0, mesh_ingress=True)
+    try:
+        assert len(listeners) == 1
+        assert listeners[0].family == socket.AF_INET
+        assert listeners[0].getsockname()[0] == "127.0.0.1"
+    finally:
+        for listener in listeners:
+            listener.close()
+
+
+def test_resolve_port_prefers_mesh_ingress_port(monkeypatch):
+    monkeypatch.setenv("MESH_INGRESS_PORT", "11288")
+    monkeypatch.setenv("PORT", "30010")
+
+    assert MODULE.resolve_port(mesh_ingress=True) == 11288
+    assert MODULE.resolve_port(mesh_ingress=False) == 30010
+
+
+def test_http_mesh_ingress_enabled_accepts_platform_boolean(monkeypatch):
+    monkeypatch.setenv("REQUIRE_HTTP_MESH", "True")
+
+    assert MODULE.http_mesh_ingress_enabled() is True
 
 
 def test_configure_public_base_url_prefers_the_global_ipv6(monkeypatch):
