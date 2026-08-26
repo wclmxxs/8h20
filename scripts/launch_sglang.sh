@@ -108,9 +108,11 @@ args=(
   --port "${SGLANG_PORT}"
 )
 
-if [[ -n ${ATTENTION_BACKEND} && ${ATTENTION_BACKEND} != auto ]]; then
-  args+=(--attention-backend "${ATTENTION_BACKEND}")
-fi
+# MiniMax H3 resolves its DiT backend from the component map below.  The
+# top-level `sglang serve --attention-backend` flag belongs to the LLM server
+# parser and deliberately does not accept multimodal aliases such as
+# `sol_attn`/`fa`.  Passing the profile marker through that flag makes the
+# process exit during argparse before the model-specific arguments are loaded.
 if [[ -n ${COMPONENT_ATTENTION_BACKENDS} ]]; then
   args+=(--component-attention-backends "${COMPONENT_ATTENTION_BACKENDS}")
 fi

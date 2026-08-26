@@ -119,6 +119,7 @@ def test_sglang_command_uses_shared_eight_gpu_launcher():
     assert "ULYSSES=${ULYSSES:-8}" in launcher
     assert '--lora-path "${lora_path}"' in launcher
     assert '--component-attention-backends "${COMPONENT_ATTENTION_BACKENDS}"' in launcher
+    assert 'args+=(--attention-backend "${ATTENTION_BACKEND}")' not in launcher
     assert 'exec "${args[@]}"' in launcher
 
 

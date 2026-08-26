@@ -57,6 +57,7 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
     assert "TP=${TP:-1}" in launcher
     assert "ULYSSES=${ULYSSES:-8}" in launcher
     assert "transformer=sol_attn" in launcher
+    assert 'args+=(--attention-backend "${ATTENTION_BACKEND}")' not in launcher
     assert "SOL_QUANTIZATION:-fp8" in launcher
     assert "SOL_LORA_MERGE_MODE:-dynamic" in launcher
     assert "SOL_CACHE_DIT_ENABLED:-true" in launcher
