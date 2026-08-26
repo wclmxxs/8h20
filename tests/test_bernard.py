@@ -30,6 +30,7 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     assert "download_lora.py" in dockerfile
     assert "LORA_SHA256" in dockerfile
     assert "COPY api/app /opt/minimax-h3/api/app" in dockerfile
+    assert "COPY api/run_dual_stack.py /opt/minimax-h3/api/run_dual_stack.py" in dockerfile
     assert "COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh" in dockerfile
 
 
@@ -51,7 +52,7 @@ def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
     assert "model_is_complete" in entrypoint
     assert "prepare_model" in entrypoint
     assert "/opt/minimax-h3/bin/launch_sglang.sh" in entrypoint
-    assert "/opt/minimax-h3/api-venv/bin/python -m uvicorn app.server:app" in entrypoint
+    assert "/opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/api/run_dual_stack.py" in entrypoint
     assert "/opt/minimax-h3/api-venv/bin/uvicorn app.server:app" not in entrypoint
     assert "wait -n" in entrypoint
 
@@ -61,6 +62,18 @@ def test_bernard_image_verifies_the_api_module_entrypoint():
 
     assert "import fastapi, httpx, pydantic, uvicorn" in dockerfile
     assert "/opt/minimax-h3/api-venv/bin/python -m uvicorn --version" in dockerfile
+
+
+def test_bernard_api_runner_uses_separate_ipv4_and_ipv6_listeners():
+    runner = (ROOT / "api/run_dual_stack.py").read_text()
+
+    assert "socket.AF_INET" in runner
+    assert "socket.AF_INET6" in runner
+    assert "socket.IPV6_V6ONLY, 1" in runner
+    assert 'ipv4.bind(("0.0.0.0", port))' in runner
+    assert 'ipv6.bind(("::", actual_port))' in runner
+    assert "PUBLIC_ADVERTISE_IP" in runner
+    assert 'f"http://{host}:{port}"' in runner
 
 
 def test_shared_launcher_keeps_the_complete_optimization_stack():

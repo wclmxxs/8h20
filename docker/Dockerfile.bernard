@@ -52,6 +52,7 @@ RUN python3 -m venv --system-site-packages /opt/minimax-h3/api-venv \
       'import fastapi, httpx, pydantic, uvicorn; print(fastapi.__version__, uvicorn.__version__)' \
     && /opt/minimax-h3/api-venv/bin/python -m uvicorn --version
 COPY api/app /opt/minimax-h3/api/app
+COPY api/run_dual_stack.py /opt/minimax-h3/api/run_dual_stack.py
 COPY scripts/download_lora.py /opt/minimax-h3/bin/download_lora.py
 COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh
 COPY scripts/start_bernard.sh /opt/minimax-h3/bin/start_bernard.sh
@@ -65,6 +66,7 @@ RUN /opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/bin/download_lora.py \
       --size "${LORA_SIZE}" \
     && test -f "/cache/huggingface/hub/models--larryvrh--MiniMax-H3-Turbo-Lora/snapshots/${LORA_REVISION}/${LORA_WEIGHT}"
 RUN chmod 0755 \
+      /opt/minimax-h3/api/run_dual_stack.py \
       /opt/minimax-h3/bin/download_lora.py \
       /opt/minimax-h3/bin/launch_sglang.sh \
       /opt/minimax-h3/bin/start_bernard.sh \

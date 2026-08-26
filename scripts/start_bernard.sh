@@ -166,12 +166,8 @@ if ! curl -fsS "http://127.0.0.1:${SGLANG_PORT}/health" >/dev/null; then
   exit 1
 fi
 
-/opt/minimax-h3/api-venv/bin/python -m uvicorn app.server:app \
-  --host 0.0.0.0 \
-  --port "${API_PORT}" \
-  --workers 1 \
-  --timeout-keep-alive 120 &
+/opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/api/run_dual_stack.py &
 api_pid=$!
 
-echo "READY: Bernard API port=${API_PORT}; SGLang port=${SGLANG_PORT}; topology=TP1xUlysses8 on 8xH20"
+echo "READY: Bernard API dual-stack port=${API_PORT}; SGLang port=${SGLANG_PORT}; topology=TP1xUlysses8 on 8xH20"
 wait -n "${sglang_pid}" "${api_pid}"

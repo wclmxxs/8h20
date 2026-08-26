@@ -248,6 +248,8 @@ Content-Type: application/json
 | `SOL_CACHE_DIT_RDT` | `0.12` | 激进残差差异缓存阈值，允许更多复用 |
 | `SOL_CACHE_DIT_MC` | `3` | 最多连续缓存 3 个 step |
 | `REMOTE_MEDIA_HOST_ALLOWLIST` | `.byted.org` | 可访问的私网图片域名后缀；公网域名自动允许 |
+| `PUBLIC_BASE_URL` | 自动发现 | Bernard 默认优先选择实例的全局 IPv6，并结合动态 `PORT` 返回临时视频直链；显式设置时保持指定地址 |
+| `PUBLIC_ADVERTISE_IP` | 空 | 可覆盖自动发现的实例地址；IPv6 会自动按 URL 规范添加方括号 |
 | `VIDEO_RETENTION_HOURS` | `12` | 视频和对应任务元数据保留时间 |
 | `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | 减少跨请求显存碎片和可恢复性 OOM |
 | `WATCHDOG_STALL_SECONDS` | `300` | 有活跃任务但没有状态推进多久后重启对应 worker |
