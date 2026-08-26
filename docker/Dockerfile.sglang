@@ -1,0 +1,40 @@
+ARG SGLANG_BASE_IMAGE=lmsysorg/sglang:nightly-dev-20260812-c7c03ec5@sha256:d7538b2bae8aff4b00b826442f7abd69d45ded936bc16fd0a493a2466df52050
+FROM ${SGLANG_BASE_IMAGE}
+
+ARG SGLANG_EXPECTED_COMMIT=c7c03ec53b
+ARG SAGEATTENTION_REVISION=d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4
+
+COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh
+COPY patches/minimax-h3-short-edge.patch /tmp/minimax-h3-short-edge.patch
+COPY patches/minimax-h3-request-optimization.patch /tmp/minimax-h3-request-optimization.patch
+COPY patches/minimax-h3-temporal-dense-prefix.patch /tmp/minimax-h3-temporal-dense-prefix.patch
+RUN cd /sgl-workspace/sglang \
+    && actual_commit="$(git rev-parse --short=10 HEAD)" \
+    && test "${actual_commit}" = "${SGLANG_EXPECTED_COMMIT}" \
+    && for patch in \
+         /tmp/minimax-h3-short-edge.patch \
+         /tmp/minimax-h3-request-optimization.patch \
+         /tmp/minimax-h3-temporal-dense-prefix.patch; do \
+         if git apply -p1 --check "${patch}"; then \
+           git apply -p1 "${patch}"; \
+         elif git apply -p1 --reverse --check "${patch}"; then \
+           echo "$(basename "${patch}") is already present"; \
+         else \
+           echo "$(basename "${patch}") does not match this SGLang image; pin SGLANG_BASE_IMAGE to a validated build" >&2; \
+           exit 1; \
+         fi; \
+       done \
+    && rm /tmp/minimax-h3-short-edge.patch \
+          /tmp/minimax-h3-request-optimization.patch \
+          /tmp/minimax-h3-temporal-dense-prefix.patch
+
+# Pin the upstream revision containing the Hopper/SM90 binding fix. --no-deps
+# prevents pip from replacing the CUDA/PyTorch stack already validated by SGLang.
+RUN TORCH_CUDA_ARCH_LIST=9.0 python3 -m pip install \
+      --no-cache-dir \
+      --no-deps \
+      --force-reinstall \
+      --no-build-isolation \
+      "git+https://github.com/thu-ml/SageAttention.git@${SAGEATTENTION_REVISION}" \
+    && python3 -c 'import importlib.util; assert importlib.util.find_spec("sageattention")' \
+    && chmod 0755 /opt/minimax-h3/bin/launch_sglang.sh

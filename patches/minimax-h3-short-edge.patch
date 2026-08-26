@@ -1,0 +1,119 @@
+Subject: [PATCH] MiniMax-H3: allow opt-in non-768 short edges
+
+`SGLANG_MINIMAX_H3_EXTRA_SHORT_EDGES` is a comma-separated list of positive
+32-aligned short edges. The released 768 value remains accepted.
+---
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/resolved_plan.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/resolved_plan.py
+@@ -20,6 +20,7 @@
+ from __future__ import annotations
+ 
+ import math
++import os
+ from collections.abc import Mapping
+ from typing import Any
+ 
+@@ -40,10 +41,38 @@
+ 
+ MINIMAX_H3_SHAPE_POLICY_VERSION = "adapt_shape_v1"
+ MINIMAX_H3_BASE_SHORT_EDGE = 768
++# Deliberately NOT derived from the accepted short edge: this is the model's tested token
++# budget, not a function of the request. Scaling it down with a smaller short edge would make
++# the soft cap newly clip ratios it was never meant to clip.
+ MINIMAX_H3_MAX_PIXELS = MINIMAX_H3_BASE_SHORT_EDGE * 1344
+ MINIMAX_H3_CANVAS_MULTIPLE = 32
+ MINIMAX_H3_MIN_ASPECT_RATIO = 1.0 / 4.0
+ MINIMAX_H3_MAX_ASPECT_RATIO = 4.0
++
++MINIMAX_H3_EXTRA_SHORT_EDGES_ENV = "SGLANG_MINIMAX_H3_EXTRA_SHORT_EDGES"
++
++
++def minimax_h3_allowed_short_edges() -> tuple[int, ...]:
++    """Return accepted short edges, including the released 768 value."""
++    extra: list[int] = []
++    for token in os.environ.get(MINIMAX_H3_EXTRA_SHORT_EDGES_ENV, "").split(","):
++        token = token.strip()
++        if not token:
++            continue
++        try:
++            value = int(token)
++        except ValueError as exc:
++            raise ValueError(
++                f"{MINIMAX_H3_EXTRA_SHORT_EDGES_ENV} must be a comma-separated list of "
++                f"integers, got {token!r}"
++            ) from exc
++        if value <= 0 or value % MINIMAX_H3_CANVAS_MULTIPLE:
++            raise ValueError(
++                f"{MINIMAX_H3_EXTRA_SHORT_EDGES_ENV} entries must be positive multiples of "
++                f"{MINIMAX_H3_CANVAS_MULTIPLE}, got {value}"
++            )
++        extra.append(value)
++    return tuple(sorted({MINIMAX_H3_BASE_SHORT_EDGE, *extra}))
+ 
+ 
+ class MiniMaxH3MaterialPlanItem(msgspec.Struct, frozen=True):
+@@ -97,13 +126,16 @@
+ 
+ 
+ def _validate_base_short_edge(value: Any) -> int:
++    allowed = minimax_h3_allowed_short_edges()
++    expected = allowed[0] if len(allowed) == 1 else f"one of {list(allowed)}"
+     try:
+         short_edge = int(value)
+     except (TypeError, ValueError) as exc:
+-        raise ValueError("target.short_edge must be 768") from exc
+-    if short_edge != MINIMAX_H3_BASE_SHORT_EDGE or value != short_edge:
++        raise ValueError(f"target.short_edge must be {expected}") from exc
++    if short_edge not in allowed or value != short_edge:
+         raise ValueError(
+-            f"target.short_edge must be 768 for MiniMax H3 shape policy v2, got {value!r}"
++            f"target.short_edge must be {expected} for MiniMax H3 shape policy v2, "
++            f"got {value!r}"
+         )
+     return short_edge
+ 
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/request_validation.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/request_validation.py
+@@ -18,6 +18,9 @@
+     MINIMAX_H3_MIN_DURATION_SECONDS,
+     MINIMAX_H3_SUPPORTED_FPS,
+ )
++from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.resolved_plan import (
++    minimax_h3_allowed_short_edges,
++)
+ from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.task_profiles import (
+     MINIMAX_H3_CONDITION_ROLE_KEYFRAME,
+     MINIMAX_H3_CONDITION_ROLE_REFERENCE,
+@@ -83,9 +86,11 @@
+     # compatibility keys are ignored; only these three declared values are
+     # validated and emitted below.
+     short_edge = _require_int(target.get("short_edge"), f"{path}.short_edge")
+-    if short_edge != 768:
++    allowed = minimax_h3_allowed_short_edges()
++    if short_edge not in allowed:
++        expected = allowed[0] if len(allowed) == 1 else f"one of {list(allowed)}"
+         raise ValueError(
+-            f"{path}.short_edge must be 768 for minimax_h3, got {short_edge}"
++            f"{path}.short_edge must be {expected} for minimax_h3, got {short_edge}"
+         )
+     aspect_ratio = _require_str(target.get("aspect_ratio"), f"{path}.aspect_ratio")
+     if profile.aspect_ratio_forced_auto and aspect_ratio != "auto":
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/prequeue.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/prequeue.py
+@@ -22,7 +22,6 @@
+     minimax_h3_probe_material,
+ )
+ from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.resolved_plan import (
+-    MINIMAX_H3_BASE_SHORT_EDGE,
+     MINIMAX_H3_RESOLVED_PLAN_EXTRA_KEY,
+     MiniMaxH3ResolvedPlan,
+     minimax_h3_plan_from_batch,
+@@ -298,7 +297,7 @@
+                 resolved = minimax_h3_resolve_spatial_shape(
+                     width=width,
+                     height=height,
+-                    base_short_edge=MINIMAX_H3_BASE_SHORT_EDGE,
++                    base_short_edge=int(shape["base_short_edge"]),
+                 )
+             elif material.material_chain == "image.reference_preserve":
+                 width, height = _display_shape(

@@ -1,0 +1,403 @@
+diff --git a/python/sglang/multimodal_gen/configs/sample/minimax_h3.py b/python/sglang/multimodal_gen/configs/sample/minimax_h3.py
+index 6035001..b28696f 100644
+--- a/python/sglang/multimodal_gen/configs/sample/minimax_h3.py
++++ b/python/sglang/multimodal_gen/configs/sample/minimax_h3.py
+@@ -18,7 +18,7 @@ def _optional_unit_float(value: Any, field_name: str) -> float | None:
+     if isinstance(value, bool) or not isinstance(value, (int, float)):
+         raise ValueError(f"{field_name} must be a number")
+     out = float(value)
+-    if out < 0.0 or out > 1.0:
++    if not math.isfinite(out) or out < 0.0 or out > 1.0:
+         raise ValueError(f"{field_name} must be in [0, 1]")
+     return out
+ 
+@@ -34,6 +34,107 @@ def _optional_positive_finite_float(value: Any, field_name: str) -> float | None
+     return out
+ 
+ 
++def _optional_bool(value: Any, field_name: str) -> bool | None:
++    if value is None:
++        return None
++    if not isinstance(value, bool):
++        raise ValueError(f"{field_name} must be a boolean")
++    return value
++
++
++def _optional_bounded_int(
++    value: Any,
++    field_name: str,
++    *,
++    minimum: int,
++    maximum: int,
++) -> int | None:
++    if value is None:
++        return None
++    if isinstance(value, bool) or not isinstance(value, int):
++        raise ValueError(f"{field_name} must be an integer")
++    if value < minimum or value > maximum:
++        raise ValueError(
++            f"{field_name} must be in [{minimum}, {maximum}]"
++        )
++    return value
++
++
++def normalize_minimax_h3_optimization(value: Any) -> dict[str, Any] | None:
++    """Validate request-scoped acceleration overrides.
++
++    Unknown keys are ignored so the public API can remain forward-compatible.
++    Missing keys deliberately inherit the process-level deployment defaults.
++    """
++
++    if value is None:
++        return None
++    if not isinstance(value, Mapping):
++        raise ValueError("optimization must be an object")
++
++    normalized: dict[str, Any] = {}
++    sol_attn = value.get("sol_attn")
++    if sol_attn is not None:
++        if not isinstance(sol_attn, Mapping):
++            raise ValueError("optimization.sol_attn must be an object")
++        sol_config: dict[str, Any] = {}
++        enabled = _optional_bool(
++            sol_attn.get("enabled"), "optimization.sol_attn.enabled"
++        )
++        dense_steps = _optional_bounded_int(
++            sol_attn.get("dense_steps"),
++            "optimization.sol_attn.dense_steps",
++            minimum=0,
++            maximum=100,
++        )
++        tau = _optional_positive_finite_float(
++            sol_attn.get("tau"), "optimization.sol_attn.tau"
++        )
++        for name, item in (
++            ("enabled", enabled),
++            ("dense_steps", dense_steps),
++            ("tau", tau),
++        ):
++            if item is not None:
++                sol_config[name] = item
++        normalized["sol_attn"] = sol_config
++
++    cache_dit = value.get("cache_dit")
++    if cache_dit is not None:
++        if not isinstance(cache_dit, Mapping):
++            raise ValueError("optimization.cache_dit must be an object")
++        cache_config: dict[str, Any] = {}
++        enabled = _optional_bool(
++            cache_dit.get("enabled"), "optimization.cache_dit.enabled"
++        )
++        warmup = _optional_bounded_int(
++            cache_dit.get("warmup"),
++            "optimization.cache_dit.warmup",
++            minimum=0,
++            maximum=100,
++        )
++        rdt = _optional_unit_float(
++            cache_dit.get("rdt"), "optimization.cache_dit.rdt"
++        )
++        max_cached = _optional_bounded_int(
++            cache_dit.get("max_continuous_cached_steps"),
++            "optimization.cache_dit.max_continuous_cached_steps",
++            minimum=1,
++            maximum=100,
++        )
++        for name, item in (
++            ("enabled", enabled),
++            ("warmup", warmup),
++            ("rdt", rdt),
++            ("max_continuous_cached_steps", max_cached),
++        ):
++            if item is not None:
++                cache_config[name] = item
++        normalized["cache_dit"] = cache_config
++
++    return normalized
++
++
+ @dataclass
+ class MiniMaxH3SamplingParams(SamplingParams):
+     height: int = 512
+@@ -53,6 +154,7 @@ class MiniMaxH3SamplingParams(SamplingParams):
+     conditions: list[dict[str, Any]] | None = None
+     target: dict[str, Any] | None = None
+     audio_flow_shift: float | None = None
++    optimization: dict[str, Any] | None = None
+     output_mode: str | None = field(
+         default=None,
+         metadata={"batch_sig_exclude": True},
+@@ -71,6 +173,7 @@ class MiniMaxH3SamplingParams(SamplingParams):
+                 "output_mode",
+                 "imgvid_cond_noise_aug_for_inference",
+                 "audio_cond_noise_aug_for_inference",
++                "optimization",
+             }
+         )
+ 
+@@ -197,6 +300,7 @@ class MiniMaxH3SamplingParams(SamplingParams):
+                 if field_name in self.target
+             }
+         super()._validate()
++        self.optimization = normalize_minimax_h3_optimization(self.optimization)
+         _optional_positive_finite_float(self.flow_shift, "flow_shift")
+         _optional_positive_finite_float(self.audio_flow_shift, "audio_flow_shift")
+         if self.enable_frame_interpolation:
+@@ -251,6 +355,8 @@ class MiniMaxH3SamplingParams(SamplingParams):
+             "audio_cond_noise_aug_for_inference",
+         )
+         extra = super().build_request_extra()
++        if self.optimization is not None:
++            extra["minimax_h3_optimization"] = self.optimization
+         if self.task is not None:
+             from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.request_validation import (
+                 minimax_h3_validate_canonical_request,
+diff --git a/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py b/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
+index a63057a..30d0e32 100644
+--- a/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
++++ b/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
+@@ -3,6 +3,9 @@
+ from __future__ import annotations
+ 
+ import re
++from contextlib import contextmanager
++from contextvars import ContextVar
++from typing import Any, Iterator
+ 
+ import torch
+ 
+@@ -19,6 +22,21 @@ from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
+ logger = init_logger(__name__)
+ 
+ _SOL_ATTN_HEAD_DIM = 128
++_REQUEST_SOL_ATTN_CONFIG: ContextVar[dict[str, Any] | None] = ContextVar(
++    "request_sol_attn_config",
++    default=None,
++)
++
++
++@contextmanager
++def request_sol_attn_config(config: dict[str, Any] | None) -> Iterator[None]:
++    """Apply normalized Sol-Attn overrides for one worker batch."""
++
++    token = _REQUEST_SOL_ATTN_CONFIG.set(config)
++    try:
++        yield
++    finally:
++        _REQUEST_SOL_ATTN_CONFIG.reset(token)
+ 
+ 
+ def _parse_layer_ranges(spec: str | int | None) -> frozenset[int]:
+@@ -59,13 +77,17 @@ def _get_sol_attn_runtime_config() -> dict:
+     cfg = getattr(server_args, "attention_backend_config", None) or {}
+     dense_layers = cfg.get("dense_layers", "0,1")
+     sink_start = cfg.get("sink_start", 0)
++    request_cfg = _REQUEST_SOL_ATTN_CONFIG.get() or {}
+     return {
+-        "tau": float(cfg.get("tau", 1.0)),
++        "enabled": bool(request_cfg.get("enabled", True)),
++        "tau": float(request_cfg.get("tau", cfg.get("tau", 1.0))),
+         "thresh_type": str(cfg.get("thresh_type", "diag")),
+         "kv_splits": cfg.get("kv_splits", "auto"),
+         "sink_tokens": int(cfg.get("sink_tokens", 0)),
+         "sink_start": None if sink_start is None else int(sink_start),
+-        "dense_steps": int(cfg.get("dense_steps", 10)),
++        "dense_steps": int(
++            request_cfg.get("dense_steps", cfg.get("dense_steps", 10))
++        ),
+         "dense_layers": _parse_layer_ranges(dense_layers),
+     }
+ 
+@@ -117,6 +139,8 @@ class SolAttnImpl(AttentionImpl):
+ 
+     def _should_use_dense(self) -> bool:
+         cfg = _get_sol_attn_runtime_config()
++        if not cfg["enabled"]:
++            return True
+         try:
+             from sglang.multimodal_gen.runtime.managers.forward_context import (
+                 get_forward_context,
+diff --git a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+index 568e82a..65786b5 100644
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+@@ -389,11 +389,16 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+         )
+         self._minimax_h3_quality = "lossless"
+         self._minimax_h3_cache_mode: str | None = None
++        self._minimax_h3_cache_signature: tuple[Any, ...] | None = None
++        self._minimax_h3_cache_override: dict[str, Any] | None = None
+ 
+     def _owns_compile_warmup_lifecycle(self) -> bool:
+         return True
+ 
+     def _cache_dit_requested(self) -> bool:
++        override = getattr(self, "_minimax_h3_cache_override", None)
++        if override is not None and "enabled" in override:
++            return bool(override["enabled"])
+         return (
+             getattr(self, "_minimax_h3_quality", "lossless") == "high"
+             or super()._cache_dit_requested()
+@@ -404,29 +409,59 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+     ) -> None:
+         quality = getattr(batch.sampling_params, "quality", "lossless")
+         explicit_fields = getattr(batch.sampling_params, "_explicit_fields", ())
+-        generic_requested = (
+-            super()._cache_dit_requested() and "quality" not in explicit_fields
+-        )
+-        desired_mode = (
+-            "high" if quality == "high" else ("generic" if generic_requested else None)
++        optimization = batch.extra.get("minimax_h3_optimization") or {}
++        cache_override = optimization.get("cache_dit")
++        self._minimax_h3_cache_override = cache_override
++        if cache_override is None:
++            generic_requested = (
++                super()._cache_dit_requested() and "quality" not in explicit_fields
++            )
++            desired_mode = (
++                "high"
++                if quality == "high"
++                else ("generic" if generic_requested else None)
++            )
++        else:
++            requested = (
++                bool(cache_override["enabled"])
++                if "enabled" in cache_override
++                else (
++                    quality == "high"
++                    or (
++                        super()._cache_dit_requested()
++                        and "quality" not in explicit_fields
++                    )
++                )
++            )
++            desired_mode = "request" if requested else None
++        desired_signature = (
++            None
++            if desired_mode is None
++            else (
++                desired_mode,
++                tuple(sorted((cache_override or {}).items())),
++                quality,
++            )
+         )
+-        current_mode = getattr(self, "_minimax_h3_cache_mode", None)
++        current_signature = getattr(self, "_minimax_h3_cache_signature", None)
+         self._minimax_h3_quality = quality
+ 
+         # H3 is monolithic-only, and the scheduler executes one worker batch at
+         # a time. Combined with `quality` in the dynamic-batch signature, this
+         # makes the process-wide hook transition safe at this batch boundary.
+-        if self._cache_dit_enabled and current_mode != desired_mode:
++        if self._cache_dit_enabled and current_signature != desired_signature:
+             self.transformer = disable_cache_on_transformer(self.transformer)
+             self._cache_dit_enabled = False
+             self._cached_num_steps = None
+             self._minimax_h3_cache_mode = None
++            self._minimax_h3_cache_signature = None
+ 
+         if desired_mode is None:
+             return
+         super()._maybe_enable_cache_dit(num_inference_steps, batch)
+         if self._cache_dit_enabled:
+             self._minimax_h3_cache_mode = desired_mode
++            self._minimax_h3_cache_signature = desired_signature
+ 
+     def _cache_dit_scm_masks(
+         self, primary_num_steps: int, secondary_num_steps: int | None = None
+@@ -444,26 +479,37 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+         secondary: bool = False,
+     ) -> CacheDitConfig:
+         if secondary or getattr(self, "_minimax_h3_quality", "lossless") != "high":
+-            return super()._build_cache_dit_config(
++            config = super()._build_cache_dit_config(
+                 num_inference_steps,
+                 steps_computation_mask,
+                 scm_policy,
+                 secondary=secondary,
+             )
+-        warmup, threshold, max_cached = MINIMAX_H3_HIGH_QUALITY_CACHE_DIT_CONFIG
+-        return CacheDitConfig(
+-            enabled=True,
+-            Fn_compute_blocks=1,
+-            Bn_compute_blocks=0,
+-            max_warmup_steps=warmup,
+-            residual_diff_threshold=threshold,
+-            max_continuous_cached_steps=max_cached,
+-            enable_taylorseer=False,
+-            taylorseer_order=1,
+-            num_inference_steps=num_inference_steps,
+-            steps_computation_mask=steps_computation_mask,
+-            steps_computation_policy=scm_policy,
+-        )
++        else:
++            warmup, threshold, max_cached = MINIMAX_H3_HIGH_QUALITY_CACHE_DIT_CONFIG
++            config = CacheDitConfig(
++                enabled=True,
++                Fn_compute_blocks=1,
++                Bn_compute_blocks=0,
++                max_warmup_steps=warmup,
++                residual_diff_threshold=threshold,
++                max_continuous_cached_steps=max_cached,
++                enable_taylorseer=False,
++                taylorseer_order=1,
++                num_inference_steps=num_inference_steps,
++                steps_computation_mask=steps_computation_mask,
++                steps_computation_policy=scm_policy,
++            )
++        override = getattr(self, "_minimax_h3_cache_override", None) or {}
++        if "warmup" in override:
++            config.max_warmup_steps = int(override["warmup"])
++        if "rdt" in override:
++            config.residual_diff_threshold = float(override["rdt"])
++        if "max_continuous_cached_steps" in override:
++            config.max_continuous_cached_steps = int(
++                override["max_continuous_cached_steps"]
++            )
++        return config
+ 
+     @torch.no_grad()
+     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
+@@ -512,6 +558,9 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+             MiniMaxH3DenoiseBranch,
+             minimax_h3_denoise_loop,
+         )
++        from sglang.multimodal_gen.runtime.layers.attention.backends.sol_attn import (
++            request_sol_attn_config,
++        )
+ 
+         ctx = _resolve_full_loop_context(batch)
+ 
+@@ -568,7 +617,9 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+                 device=device,
+             )
+             initial_video, initial_audio = _expand_initial_rows(ctx, positive)
++            optimization = batch.extra.get("minimax_h3_optimization") or {}
+             with (
++                request_sol_attn_config(optimization.get("sol_attn")),
+                 maybe_nvtx_range("denoising_loop", self.current_use_nvtx),
+                 self.progress_bar(
+                     total=len(sigmas_video) - 1,
+diff --git a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/video_adapter.py b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/video_adapter.py
+index a51c690..ad61953 100644
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/video_adapter.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/video_adapter.py
+@@ -62,6 +62,7 @@ class MiniMaxH3VideoModelAdapter:
+             "output_mode",
+             "imgvid_cond_noise_aug_for_inference",
+             "audio_cond_noise_aug_for_inference",
++            "optimization",
+         }
+     )
+     supported_tasks = frozenset({"t2va", "fl2va", "ref2va"})
+@@ -182,6 +183,9 @@ class MiniMaxH3VideoModelAdapter:
+                 "audio_cond_noise_aug_for_inference": _parse_extra_value(
+                     _extra_value(request, "audio_cond_noise_aug_for_inference")
+                 ),
++                "optimization": _parse_extra_value(
++                    _extra_value(request, "optimization")
++                ),
+             }
+         )
+         if quality is not None:
+

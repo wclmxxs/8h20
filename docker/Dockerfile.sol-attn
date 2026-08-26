@@ -1,0 +1,8 @@
+ARG SGLANG_BASE_IMAGE=minimax-h3-h20-sglang:20260826-v1
+FROM ${SGLANG_BASE_IMAGE}
+
+ARG SOL_ATTENTION_REVISION=5fe5febdf0f59fee1c0b44a5ce6665df0dabd247
+
+RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation \
+      "git+https://github.com/NVlabs/Sana.git@${SOL_ATTENTION_REVISION}#subdirectory=techniques/sparse_backends" \
+    && python3 -c 'import sol_attn; print("Sol-Attn import OK:", sol_attn.__file__)'

@@ -1,0 +1,37 @@
+{
+  "base_model": {
+    "repo": "MiniMaxAI/MiniMax-H3",
+    "variant": "fl2va"
+  },
+  "turbo_lora": {
+    "repo": "larryvrh/MiniMax-H3-Turbo-Lora",
+    "revision": "43a74557ac3f6539db8e0f2a959d03feb7a81480",
+    "filename": "minimax_h3_turbo_v4_step600_ema.safetensors",
+    "sha256": "5f3a626cd72c93a8b9318d6760c510bc5092d2ab13aaba1f932c5bab07a416d3",
+    "size": 779849816,
+    "nickname": "h3-turbo-v4",
+    "scale": 1.0,
+    "merge_mode": "auto"
+  },
+  "business_nfe": [4, 6, 8],
+  "default_business_nfe": 6,
+  "sglang_sigma_grid_offset": 1,
+  "runtime": {
+    "sglang_commit": "c7c03ec53b",
+    "sglang_base_image": "lmsysorg/sglang:nightly-dev-20260812-c7c03ec5",
+    "sglang_base_digest": "sha256:d7538b2bae8aff4b00b826442f7abd69d45ded936bc16fd0a493a2466df52050"
+  },
+  "topology": {
+    "gpu_model": "NVIDIA H20",
+    "gpu_count": 8,
+    "tensor_parallel": 1,
+    "ulysses_degree": 8,
+    "requests_per_worker": 1
+  },
+  "attention": {
+    "default_backend": "fa",
+    "component_overrides": "transformer=sage_attn",
+    "sageattention_revision": "d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4",
+    "cuda_arch": "9.0"
+  }
+}

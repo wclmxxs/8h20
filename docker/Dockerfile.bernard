@@ -1,0 +1,76 @@
+ARG SGLANG_BASE_IMAGE=lmsysorg/sglang:nightly-dev-20260812-c7c03ec5@sha256:d7538b2bae8aff4b00b826442f7abd69d45ded936bc16fd0a493a2466df52050
+FROM ${SGLANG_BASE_IMAGE}
+
+ARG SGLANG_EXPECTED_COMMIT=c7c03ec53b
+ARG SAGEATTENTION_REVISION=d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4
+ARG SOL_ATTENTION_REVISION=5fe5febdf0f59fee1c0b44a5ce6665df0dabd247
+
+COPY patches/minimax-h3-short-edge.patch /tmp/minimax-h3-short-edge.patch
+COPY patches/minimax-h3-request-optimization.patch /tmp/minimax-h3-request-optimization.patch
+COPY patches/minimax-h3-temporal-dense-prefix.patch /tmp/minimax-h3-temporal-dense-prefix.patch
+RUN cd /sgl-workspace/sglang \
+    && actual_commit="$(git rev-parse --short=10 HEAD)" \
+    && test "${actual_commit}" = "${SGLANG_EXPECTED_COMMIT}" \
+    && for patch in \
+         /tmp/minimax-h3-short-edge.patch \
+         /tmp/minimax-h3-request-optimization.patch \
+         /tmp/minimax-h3-temporal-dense-prefix.patch; do \
+         if git apply -p1 --check "${patch}"; then \
+           git apply -p1 "${patch}"; \
+         elif git apply -p1 --reverse --check "${patch}"; then \
+           echo "$(basename "${patch}") is already present"; \
+         else \
+           echo "$(basename "${patch}") does not match the pinned SGLang image" >&2; \
+           exit 1; \
+         fi; \
+       done \
+    && rm /tmp/minimax-h3-*.patch
+
+RUN TORCH_CUDA_ARCH_LIST=9.0 python3 -m pip install \
+      --no-cache-dir --no-deps --force-reinstall --no-build-isolation \
+      "git+https://github.com/thu-ml/SageAttention.git@${SAGEATTENTION_REVISION}" \
+    && python3 -m pip install --no-cache-dir --no-deps --no-build-isolation \
+      "git+https://github.com/NVlabs/Sana.git@${SOL_ATTENTION_REVISION}#subdirectory=techniques/sparse_backends" \
+    && python3 -c 'import cache_dit, sageattention, sol_attn; print(cache_dit.__file__, sageattention.__file__, sol_attn.__file__)'
+
+WORKDIR /opt/minimax-h3
+COPY api/requirements.txt /opt/minimax-h3/api/requirements.txt
+RUN python3 -m venv --system-site-packages /opt/minimax-h3/api-venv \
+    && /opt/minimax-h3/api-venv/bin/pip install --no-cache-dir \
+      -r /opt/minimax-h3/api/requirements.txt
+COPY api/app /opt/minimax-h3/api/app
+COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh
+COPY scripts/start_bernard.sh /opt/minimax-h3/bin/start_bernard.sh
+COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh
+RUN chmod 0755 \
+      /opt/minimax-h3/bin/launch_sglang.sh \
+      /opt/minimax-h3/bin/start_bernard.sh \
+      /opt/tiger/csde/healthcheck.sh
+
+ENV OPTIMIZATION_STACK_ENABLED=1 \
+    NUM_GPUS=8 \
+    TP=1 \
+    ULYSSES=8 \
+    ENCODER_PARALLEL=auto \
+    MODEL=MiniMaxAI/MiniMax-H3 \
+    MODEL_VARIANT=fl2va \
+    ATTENTION_BACKEND=sol_attn \
+    COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn \
+    ATTENTION_BACKEND_CONFIG=dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5 \
+    SOL_ATTN_STRICT=1 \
+    WARMUP_STEPS=3 \
+    QUANTIZATION=fp8 \
+    LORA_MERGE_MODE=dynamic \
+    SGLANG_CACHE_DIT_ENABLED=true \
+    SGLANG_CACHE_DIT_FN=1 \
+    SGLANG_CACHE_DIT_BN=0 \
+    SGLANG_CACHE_DIT_WARMUP=1 \
+    SGLANG_CACHE_DIT_RDT=0.12 \
+    SGLANG_CACHE_DIT_MC=3 \
+    SGLANG_MINIMAX_H3_EXTRA_SHORT_EDGES=480,704 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+EXPOSE 30010 30020
+HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=10 \
+  CMD ["/opt/tiger/csde/healthcheck.sh"]
+CMD ["/opt/minimax-h3/bin/start_bernard.sh"]

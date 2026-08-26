@@ -1,0 +1,4 @@
+-r api/requirements.txt
+-r reporter/requirements.txt
+pytest>=8,<10
+pyyaml>=6,<7

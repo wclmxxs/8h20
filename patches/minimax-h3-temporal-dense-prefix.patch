@@ -1,0 +1,294 @@
+diff --git a/python/sglang/multimodal_gen/configs/sample/minimax_h3.py b/python/sglang/multimodal_gen/configs/sample/minimax_h3.py
+index b28696fc5..877b865c9 100644
+--- a/python/sglang/multimodal_gen/configs/sample/minimax_h3.py
++++ b/python/sglang/multimodal_gen/configs/sample/minimax_h3.py
+@@ -34,6 +34,19 @@ def _optional_positive_finite_float(value: Any, field_name: str) -> float | None
+     return out
+ 
+ 
++def _optional_nonnegative_finite_float(
++    value: Any, field_name: str
++) -> float | None:
++    if value is None:
++        return None
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise ValueError(f"{field_name} must be a number")
++    out = float(value)
++    if not math.isfinite(out) or out < 0.0:
++        raise ValueError(f"{field_name} must be a non-negative finite number")
++    return out
++
++
+ def _optional_bool(value: Any, field_name: str) -> bool | None:
+     if value is None:
+         return None
+@@ -90,10 +103,25 @@ def normalize_minimax_h3_optimization(value: Any) -> dict[str, Any] | None:
+         tau = _optional_positive_finite_float(
+             sol_attn.get("tau"), "optimization.sol_attn.tau"
+         )
++        sink_conditioning = sol_attn.get("sink_conditioning")
++        if sink_conditioning is not None and (
++            not isinstance(sink_conditioning, str)
++            or sink_conditioning not in {"exact_kv", "exact_kv_and_rows", "off"}
++        ):
++            raise ValueError(
++                "optimization.sol_attn.sink_conditioning must be "
++                "exact_kv, exact_kv_and_rows, or off"
++            )
++        dense_prefix_seconds = _optional_nonnegative_finite_float(
++            sol_attn.get("dense_prefix_seconds"),
++            "optimization.sol_attn.dense_prefix_seconds",
++        )
+         for name, item in (
+             ("enabled", enabled),
+             ("dense_steps", dense_steps),
+             ("tau", tau),
++            ("sink_conditioning", sink_conditioning),
++            ("dense_prefix_seconds", dense_prefix_seconds),
+         ):
+             if item is not None:
+                 sol_config[name] = item
+diff --git a/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py b/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
+index 30d0e328a..d701dadbf 100644
+--- a/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
++++ b/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
+@@ -78,13 +78,20 @@ def _get_sol_attn_runtime_config() -> dict:
+     dense_layers = cfg.get("dense_layers", "0,1")
+-    sink_start = cfg.get("sink_start", 0)
+     request_cfg = _REQUEST_SOL_ATTN_CONFIG.get() or {}
++    dense_prefix_rows = int(request_cfg.get("_dense_prefix_rows", 0))
++    sink_start = request_cfg.get("_sink_start", cfg.get("sink_start", 0))
++    sink_tokens = int(
++        request_cfg.get("_sink_tokens", cfg.get("sink_tokens", 0))
++    )
+     return {
+         "enabled": bool(request_cfg.get("enabled", True)),
++        "force_dense": bool(request_cfg.get("_force_dense", False)),
+         "tau": float(request_cfg.get("tau", cfg.get("tau", 1.0))),
+         "thresh_type": str(cfg.get("thresh_type", "diag")),
+         "kv_splits": cfg.get("kv_splits", "auto"),
+-        "sink_tokens": int(cfg.get("sink_tokens", 0)),
++        "sink_tokens": sink_tokens,
+         "sink_start": None if sink_start is None else int(sink_start),
++        "dense_prefix_rows": dense_prefix_rows,
++        "live_rows": int(request_cfg.get("_live_rows", 0)),
+         "dense_steps": int(
+             request_cfg.get("dense_steps", cfg.get("dense_steps", 10))
+         ),
+@@ -139,7 +146,7 @@ class SolAttnImpl(AttentionImpl):
+ 
+     def _should_use_dense(self) -> bool:
+         cfg = _get_sol_attn_runtime_config()
+-        if not cfg["enabled"]:
++        if not cfg["enabled"] or cfg["force_dense"]:
+             return True
+         try:
+             from sglang.multimodal_gen.runtime.managers.forward_context import (
+@@ -203,6 +210,41 @@ class SolAttnImpl(AttentionImpl):
+         )
+         return out.squeeze(0)
+ 
++    def _dense_prefix_varlen(
++        self,
++        query: torch.Tensor,
++        key: torch.Tensor,
++        value: torch.Tensor,
++        *,
++        prefix_rows: int,
++        live_rows: int,
++    ) -> torch.Tensor:
++        total_rows = int(query.shape[0])
++        if not 0 < prefix_rows < live_rows <= total_rows:
++            raise RuntimeError(
++                "invalid MiniMax H3 temporal dense prefix: "
++                f"prefix_rows={prefix_rows}, live_rows={live_rows}, "
++                f"total_rows={total_rows}"
++            )
++        cu_seqlens_q = torch.tensor(
++            [0, prefix_rows], device=query.device, dtype=torch.int32
++        )
++        cu_seqlens_k = torch.tensor(
++            [0, live_rows], device=query.device, dtype=torch.int32
++        )
++        output = flash_attn_varlen_func(
++            query[:prefix_rows],
++            key[:live_rows],
++            value[:live_rows],
++            cu_seqlens_q=cu_seqlens_q,
++            cu_seqlens_k=cu_seqlens_k,
++            max_seqlen_q=prefix_rows,
++            max_seqlen_k=live_rows,
++            softmax_scale=self.softmax_scale,
++            causal=self.causal,
++        )
++        return output[0] if isinstance(output, tuple) else output
++
+     def forward(
+         self,
+         query: torch.Tensor,
+@@ -239,6 +281,10 @@ class SolAttnImpl(AttentionImpl):
+         q = query.reshape(query.shape[0] * query.shape[1], query.shape[2], -1)
+         k = key.reshape(key.shape[0] * key.shape[1], key.shape[2], -1)
+         v = value.reshape(value.shape[0] * value.shape[1], value.shape[2], -1)
++        if _get_sol_attn_runtime_config()["dense_prefix_rows"]:
++            raise RuntimeError(
++                "MiniMax H3 temporal dense prefix requires packed varlen attention"
++            )
+         out = self._run_sol_attn_thd(q, k, v)
+         return out.reshape(query.shape[0], query.shape[1], query.shape[2], -1)
+ 
+@@ -261,4 +307,15 @@ class SolAttnImpl(AttentionImpl):
+                 cu_seqlens=cu_seqlens,
+                 max_seqlen=max_seqlen,
+             )
+-        return self._run_sol_attn_thd(query, key, value)
++        out = self._run_sol_attn_thd(query, key, value)
++        cfg = _get_sol_attn_runtime_config()
++        prefix_rows = cfg["dense_prefix_rows"]
++        if prefix_rows:
++            out[:prefix_rows] = self._dense_prefix_varlen(
++                query,
++                key,
++                value,
++                prefix_rows=prefix_rows,
++                live_rows=cfg["live_rows"],
++            )
++        return out
+diff --git a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+index 65786b5e6..b4c6218e2 100644
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+@@ -5,6 +5,7 @@ single-branch execution, and payload validation.
+ 
+ from __future__ import annotations
+ 
++import math
+ from collections.abc import Mapping
+ from contextlib import contextmanager
+ from functools import partial
+@@ -46,6 +47,91 @@ _REF2VA_VIDEO_CHAINS = {
+     "video.reference_preserve",
+     "video_audio.reference_preserve",
+ }
++_MINIMAX_H3_PIXEL_FRAMES_PER_LATENT_TOKEN = (1, 4, 4, 4, 4)
++
++
++def _video_latent_prefix_tokens(*, pixel_frames: int, latent_t: int) -> int:
++    """Return the smallest temporal latent prefix covering pixel_frames."""
++
++    if pixel_frames <= 0:
++        return 0
++    covered = 0
++    for latent_index in range(latent_t):
++        covered += _MINIMAX_H3_PIXEL_FRAMES_PER_LATENT_TOKEN[
++            latent_index % len(_MINIMAX_H3_PIXEL_FRAMES_PER_LATENT_TOKEN)
++        ]
++        if covered >= pixel_frames:
++            return latent_index + 1
++    return latent_t
++
++
++def _sol_attn_request_runtime_config(
++    *,
++    config: Mapping[str, Any] | None,
++    ctx: Any,
++    positive: Any,
++    packed: Mapping[str, torch.Tensor],
++    sampling: Any,
++) -> dict[str, Any]:
++    """Resolve exact conditioning and temporal-prefix rows for one request."""
++
++    runtime = dict(config or {})
++    sink_conditioning = str(runtime.get("sink_conditioning", "exact_kv"))
++    target_start = int(positive.img_pos[positive.video_target_start])
++    live_rows = int(packed["cu_seqlens"][1])
++    if not 0 <= target_start < live_rows:
++        raise RuntimeError(
++            "invalid MiniMax H3 target-video span: "
++            f"target_start={target_start}, live_rows={live_rows}"
++        )
++
++    runtime["sink_conditioning"] = sink_conditioning
++    if sink_conditioning != "off" and target_start > 0:
++        runtime["_sink_start"] = 0
++        runtime["_sink_tokens"] = target_start
++    if sink_conditioning == "exact_kv_and_rows" and target_start > 0:
++        runtime["_dense_prefix_rows"] = target_start
++        runtime["_live_rows"] = live_rows
++
++    prefix_seconds = float(runtime.get("dense_prefix_seconds", 0.0) or 0.0)
++    if prefix_seconds <= 0.0:
++        return runtime
++
++    shape = None if ctx.plan is None else ctx.plan.shape
++    if not isinstance(shape, Mapping):
++        raise ValueError(
++            "optimization.sol_attn.dense_prefix_seconds requires a resolved plan"
++        )
++    fps = float(shape["fps"])
++    frame_count = int(shape["frame_count"])
++    target = getattr(sampling, "target", None) or {}
++    requested_duration = float(
++        target.get("duration_seconds", frame_count / fps)
++    )
++    if requested_duration <= prefix_seconds:
++        runtime["_force_dense"] = True
++        return runtime
++
++    prefix_pixel_frames = min(frame_count, math.ceil(prefix_seconds * fps))
++    prefix_latent_t = _video_latent_prefix_tokens(
++        pixel_frames=prefix_pixel_frames,
++        latent_t=int(ctx.latent_t),
++    )
++    frame_rows = (int(ctx.latent_h) // 2) * (int(ctx.latent_w) // 2)
++    prefix_video_rows = prefix_latent_t * frame_rows
++    dense_prefix_rows = target_start + prefix_video_rows
++    if dense_prefix_rows >= live_rows:
++        runtime["_force_dense"] = True
++        return runtime
++    if sink_conditioning == "off":
++        runtime["_sink_start"] = target_start
++        runtime["_sink_tokens"] = prefix_video_rows
++    else:
++        runtime["_sink_start"] = 0
++        runtime["_sink_tokens"] = dense_prefix_rows
++    runtime["_dense_prefix_rows"] = dense_prefix_rows
++    runtime["_live_rows"] = live_rows
++    return runtime
+ 
+ 
+ def minimax_h3_condition_noise_aug(sampling: Any) -> tuple[float, float]:
+@@ -554,13 +640,13 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+         construction, condition noise augmentation, initial-row expansion,
+         the denoise loop itself, and output publication.
+         """
++        from sglang.multimodal_gen.runtime.layers.attention.backends.sol_attn import (
++            request_sol_attn_config,
++        )
+         from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.denoise_loop import (
+             MiniMaxH3DenoiseBranch,
+             minimax_h3_denoise_loop,
+         )
+-        from sglang.multimodal_gen.runtime.layers.attention.backends.sol_attn import (
+-            request_sol_attn_config,
+-        )
+ 
+         ctx = _resolve_full_loop_context(batch)
+ 
+@@ -618,8 +704,15 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+             )
+             initial_video, initial_audio = _expand_initial_rows(ctx, positive)
+             optimization = batch.extra.get("minimax_h3_optimization") or {}
++            sol_attn_config = _sol_attn_request_runtime_config(
++                config=optimization.get("sol_attn"),
++                ctx=ctx,
++                positive=positive,
++                packed=packed,
++                sampling=sampling,
++            )
+             with (
+-                request_sol_attn_config(optimization.get("sol_attn")),
++                request_sol_attn_config(sol_attn_config),
+                 maybe_nvtx_range("denoising_loop", self.current_use_nvtx),
+                 self.progress_bar(
+                     total=len(sigmas_video) - 1,
