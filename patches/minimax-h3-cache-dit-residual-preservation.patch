@@ -1,0 +1,268 @@
+Subject: [PATCH] MiniMax-H3: preserve Cache-DiT residual inputs
+
+Backport upstream sglang#33827 onto the pinned 2026-08-12 runtime. MiniMax-H3's
+first gated residual normally updates its input in place. Cache-DiT retains that
+same tensor by reference, so the update aliases its snapshot and turns every
+residual-difference decision into NaN. Use the same fused Triton arithmetic with
+an out-of-place output only while Cache-DiT is mounted.
+---
+diff --git a/python/sglang/kernels/ops/diffusion/triton/indexed_modulation.py b/python/sglang/kernels/ops/diffusion/triton/indexed_modulation.py
+index 9861383..726f273 100644
+--- a/python/sglang/kernels/ops/diffusion/triton/indexed_modulation.py
++++ b/python/sglang/kernels/ops/diffusion/triton/indexed_modulation.py
+@@ -53,6 +53,7 @@ def _indexed_gate_bf16_kernel(
+     other_ptr,
+     indices_ptr,
+     hidden_size,
++    stride_output_row,
+     stride_x_row,
+     stride_gate_row,
+     stride_other_row,
+@@ -76,7 +77,7 @@ def _indexed_gate_bf16_kernel(
+ 
+     gated = round_bf16_to_fp32(gate * other)
+     tl.store(
+-        output_ptr + row * stride_x_row + columns,
++        output_ptr + row * stride_output_row + columns,
+         x + gated,
+         mask=mask,
+     )
+@@ -109,7 +110,8 @@ def indexed_scale_shift_bf16_(
+     return x
+ 
+ 
+-def indexed_gate_bf16_(
++def _indexed_gate_bf16(
++    output: torch.Tensor,
+     x: torch.Tensor,
+     gate: torch.Tensor,
+     other: torch.Tensor,
+@@ -117,15 +119,16 @@ def indexed_gate_bf16_(
+ ) -> torch.Tensor:
+     rows, hidden_size = x.shape
+     if rows == 0:
+-        return x
++        return output
+     block_n = triton.next_power_of_2(hidden_size)
+     _indexed_gate_bf16_kernel[(rows,)](
+-        x,
++        output,
+         x,
+         gate,
+         other,
+         indices,
+         hidden_size,
++        output.stride(0),
+         x.stride(0),
+         gate.stride(0),
+         other.stride(0),
+@@ -133,4 +136,22 @@ def indexed_gate_bf16_(
+         BLOCK_N=block_n,
+         num_warps=8,
+     )
+-    return x
++    return output
++
++
++def indexed_gate_bf16_(
++    x: torch.Tensor,
++    gate: torch.Tensor,
++    other: torch.Tensor,
++    indices: torch.Tensor,
++) -> torch.Tensor:
++    return _indexed_gate_bf16(x, x, gate, other, indices)
++
++
++def indexed_gate_bf16(
++    x: torch.Tensor,
++    gate: torch.Tensor,
++    other: torch.Tensor,
++    indices: torch.Tensor,
++) -> torch.Tensor:
++    return _indexed_gate_bf16(torch.empty_like(x), x, gate, other, indices)
+diff --git a/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py b/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
+index 5af54b3..d2b9f1e 100644
+--- a/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
++++ b/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
+@@ -21,6 +21,7 @@ from sglang.kernels.ops.diffusion.qknorm_rope import (
+     fused_inplace_qknorm_rope,
+ )
+ from sglang.kernels.ops.diffusion.triton.indexed_modulation import (
++    indexed_gate_bf16,
+     indexed_gate_bf16_,
+     indexed_scale_shift_bf16_,
+ )
+@@ -240,8 +241,9 @@ def _modulate_gate(
+     indices: torch.Tensor,
+     *,
+     dtype: torch.dtype,
++    allow_inplace: bool = True,
+ ) -> torch.Tensor:
+-    """Apply indexed gated residual, reusing disposable CUDA BF16 input."""
++    """Apply an indexed gated residual, optionally reusing the input buffer."""
+     # Apply the per-index gated residual: x + gate[idx] * other.
+     if (
+         x.is_cuda
+@@ -252,7 +254,9 @@ def _modulate_gate(
+         and x.is_contiguous()
+         and other.is_contiguous()
+     ):
+-        return indexed_gate_bf16_(x, gate, other, indices)
++        if allow_inplace:
++            return indexed_gate_bf16_(x, gate, other, indices)
++        return indexed_gate_bf16(x, gate, other, indices)
+     return (x + gate.index_select(0, indices) * other).to(dtype)
+ 
+ 
+@@ -933,6 +937,7 @@ class MiniMaxH3DiTBlock(nn.Module):
+             expand_ratio=6,
+             modality_num=MINIMAX_H3_ADALN_MODALITY_NUM,
+         )
++        self.preserve_input_for_cache_dit = False
+ 
+     def forward(
+         self,
+@@ -958,7 +963,9 @@ class MiniMaxH3DiTBlock(nn.Module):
+         if adaln_params is None:
+             adaln_params = self.adaln_proj(adaln_input)
+         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = adaln_params
+-
++        # Cache-DiT retains the inputs to its Fn and Mn block ranges. Only the
++        # first gated residual writes to that tensor; the second one operates on
++        # a block-local buffer.
+         residual = x
+         h = self.norm1(x)
+         h = _modulate_scale_shift(
+@@ -973,7 +980,14 @@ class MiniMaxH3DiTBlock(nn.Module):
+             ulysses_active=ulysses_active,
+             ring_active=ring_active,
+         )
+-        x = _modulate_gate(residual, gate_msa, h, combined_indices, dtype=_BF16_DTYPE)
++        x = _modulate_gate(
++            residual,
++            gate_msa,
++            h,
++            combined_indices,
++            dtype=_BF16_DTYPE,
++            allow_inplace=not self.preserve_input_for_cache_dit,
++        )
+ 
+         residual = x
+         h = self.norm2(x)
+@@ -981,8 +995,14 @@ class MiniMaxH3DiTBlock(nn.Module):
+             h, shift_mlp, scale_mlp, combined_indices, dtype=_BF16_DTYPE
+         )
+         h = self.mlp(h)
++        # `residual` is block-local here (see above), so this stays in-place
++        # even while Cache-DiT is attached.
+         return _modulate_gate(
+-            residual, gate_mlp, h, combined_indices, dtype=_BF16_DTYPE
++            residual,
++            gate_mlp,
++            h,
++            combined_indices,
++            dtype=_BF16_DTYPE,
+         )
+ 
+ 
+@@ -1217,6 +1237,22 @@ class MiniMaxH3DiTModel(BaseDiT, LayerwiseOffloadableModuleMixin):
+         self._resolved_attention_backend: AttentionBackendEnum | None = None
+         self._mark_missing_params_required()
+ 
++    def set_cache_dit_input_preservation(self, enabled: bool) -> None:
++        """Stop the blocks from overwriting the input Cache-DiT holds by reference.
++
++        Cache-DiT snapshots the block-stack input to measure its residuals, so a
++        block that rewrites its own input in place makes that residual read as
++        zero. Only the first gated residual of a block writes the block input;
++        the second one operates on a buffer this block just allocated, so it is
++        left on the in-place fused path either way.
++
++        The caller owns the lifecycle. It has to be on before Cache-DiT mounts,
++        because mounting replaces `blocks` with a wrapper and the real blocks
++        stop being reachable by iterating it.
++        """
++        for block in self.blocks:
++            block.preserve_input_for_cache_dit = enabled
++
+     def _resolve_attention_backend_once(self) -> None:
+         if self._resolved_attention_backend is not None:
+             return
+diff --git a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+index 687975b..4230dc9 100644
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/stages/model_specific_stages/minimax_h3/stages/denoising.py
+@@ -536,18 +536,72 @@ class MiniMaxH3DenoisingStage(DenoisingStage):
+         # a time. Combined with `quality` in the dynamic-batch signature, this
+         # makes the process-wide hook transition safe at this batch boundary.
+         if self._cache_dit_enabled and current_signature != desired_signature:
++            # Unmount first: the blocks must stay preserved while Cache-DiT
++            # still holds references to their inputs.
+             self.transformer = disable_cache_on_transformer(self.transformer)
+             self._cache_dit_enabled = False
+             self._cached_num_steps = None
+             self._minimax_h3_cache_mode = None
+             self._minimax_h3_cache_signature = None
++            self._set_cache_dit_input_preservation(False)
+ 
+         if desired_mode is None:
+             return
+-        super()._maybe_enable_cache_dit(num_inference_steps, batch)
++
++        # Cache-DiT retains the block-stack input by reference. Arm the H3
++        # out-of-place first residual before mounting, while the real blocks
++        # are still reachable rather than hidden behind CachedBlocks.
++        was_enabled = self._cache_dit_enabled
++        if not was_enabled:
++            self._set_cache_dit_input_preservation(True)
++        try:
++            super()._maybe_enable_cache_dit(num_inference_steps, batch)
++        except Exception:
++            if not was_enabled:
++                self._disarm_after_failed_mount()
++            raise
++
+         if self._cache_dit_enabled:
+             self._minimax_h3_cache_mode = desired_mode
+             self._minimax_h3_cache_signature = desired_signature
++        elif not was_enabled:
++            self._set_cache_dit_input_preservation(False)
++
++    def _disarm_after_failed_mount(self) -> None:
++        """Restore the in-place path only after Cache-DiT is confirmed gone."""
++        try:
++            self.transformer = disable_cache_on_transformer(self.transformer)
++        except Exception:
++            logger.warning(
++                "Could not unmount Cache-DiT after a failed mount; leaving "
++                "MiniMax-H3 input preservation on",
++                exc_info=True,
++            )
++            return
++        self._cache_dit_enabled = False
++        self._cached_num_steps = None
++        self._minimax_h3_cache_mode = None
++        self._minimax_h3_cache_signature = None
++        self._set_cache_dit_input_preservation(False)
++
++    def _set_cache_dit_input_preservation(self, enabled: bool) -> None:
++        """Flip H3 input preservation through compile/parallel wrappers."""
++        model = self.transformer
++        for _ in range(4):
++            if hasattr(model, "set_cache_dit_input_preservation"):
++                break
++            inner = getattr(model, "_orig_mod", None) or getattr(model, "module", None)
++            if inner is None:
++                break
++            model = inner
++        setter = getattr(model, "set_cache_dit_input_preservation", None)
++        if not callable(setter):
++            raise TypeError(
++                "MiniMax-H3 Cache-DiT requires "
++                "set_cache_dit_input_preservation() on the transformer, but "
++                f"{type(self.transformer).__name__} does not expose it"
++            )
++        setter(enabled)
+ 
+     def _cache_dit_scm_masks(
+         self, primary_num_steps: int, secondary_num_steps: int | None = None

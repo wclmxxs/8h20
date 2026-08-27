@@ -33,11 +33,15 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     compile_ulysses_patch = (
         ROOT / "patches/minimax-h3-compile-ulysses-eager.patch"
     ).read_text()
+    cache_dit_patch = (
+        ROOT / "patches/minimax-h3-cache-dit-residual-preservation.patch"
+    ).read_text()
 
     assert "minimax-h3-request-optimization.patch" in dockerfile
     assert "minimax-h3-temporal-dense-prefix.patch" in dockerfile
     assert "minimax-h3-static-lora-before-fp8.patch" in dockerfile
     assert "minimax-h3-compile-ulysses-eager.patch" in dockerfile
+    assert "minimax-h3-cache-dit-residual-preservation.patch" in dockerfile
     assert "minimax_h3_optimization" in patch
     assert "request_sol_attn_config" in patch
     assert "max_continuous_cached_steps" in patch
@@ -61,6 +65,9 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert "eager_on_graph(True)(" in compile_ulysses_patch
     assert "logits = _minimax_h3_sp_all_gather_eager" in compile_ulysses_patch
     assert "c10d functional" in compile_ulysses_patch
+    assert "set_cache_dit_input_preservation" in cache_dit_patch
+    assert "allow_inplace=not self.preserve_input_for_cache_dit" in cache_dit_patch
+    assert "indexed_gate_bf16(torch.empty_like(x)" in cache_dit_patch
 
 
 def test_optimization_toggle_reinstalls_the_single_worker():
@@ -76,6 +83,8 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "inspect.getsourcefile" in script
     assert "_minimax_h3_sp_all_gather_compiler_eager" in script
     assert "eager_on_graph(True)" in script
+    assert "minimax-h3-cache-dit-residual-preservation.patch" in script
+    assert "git apply -p1" in script
     assert "debug_hold.py" in script
     assert "process_is_live" in script
     assert "json.load(sys.stdin).get(\"ok\") is True" in script

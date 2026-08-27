@@ -98,10 +98,20 @@ stop_services() {
 }
 
 apply_runtime_patch() {
-  local runtime_source backup
+  local runtime_source backup cache_dit_patch
 
   [[ -d ${runtime_root} ]] || die "missing SGLang workspace: ${runtime_root}"
   cd "${runtime_root}"
+  cache_dit_patch=${repo_root}/patches/minimax-h3-cache-dit-residual-preservation.patch
+  [[ -f ${cache_dit_patch} ]] || die "missing Cache-DiT patch: ${cache_dit_patch}"
+  if git apply -p1 --check "${cache_dit_patch}"; then
+    git apply -p1 "${cache_dit_patch}"
+    echo "Applied MiniMax-H3 Cache-DiT residual preservation patch."
+  elif git apply -p1 --reverse --check "${cache_dit_patch}"; then
+    echo "MiniMax-H3 Cache-DiT residual preservation patch already present."
+  else
+    die "Cache-DiT patch does not match the active SGLang runtime"
+  fi
   runtime_source=$(
     python3 - <<'PY'
 import inspect

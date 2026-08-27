@@ -10,6 +10,7 @@ COPY patches/minimax-h3-request-optimization.patch /tmp/minimax-h3-request-optim
 COPY patches/minimax-h3-temporal-dense-prefix.patch /tmp/minimax-h3-temporal-dense-prefix.patch
 COPY patches/minimax-h3-static-lora-before-fp8.patch /tmp/minimax-h3-static-lora-before-fp8.patch
 COPY patches/minimax-h3-compile-ulysses-eager.patch /tmp/minimax-h3-compile-ulysses-eager.patch
+COPY patches/minimax-h3-cache-dit-residual-preservation.patch /tmp/minimax-h3-cache-dit-residual-preservation.patch
 RUN cd /sgl-workspace/sglang \
     && actual_commit="$(git rev-parse --short=10 HEAD)" \
     && test "${actual_commit}" = "${SGLANG_EXPECTED_COMMIT}" \
@@ -18,7 +19,8 @@ RUN cd /sgl-workspace/sglang \
          /tmp/minimax-h3-request-optimization.patch \
          /tmp/minimax-h3-temporal-dense-prefix.patch \
          /tmp/minimax-h3-static-lora-before-fp8.patch \
-         /tmp/minimax-h3-compile-ulysses-eager.patch; do \
+         /tmp/minimax-h3-compile-ulysses-eager.patch \
+         /tmp/minimax-h3-cache-dit-residual-preservation.patch; do \
          if git apply -p1 --check "${patch}"; then \
            git apply -p1 "${patch}"; \
          elif git apply -p1 --reverse --check "${patch}"; then \
@@ -32,7 +34,8 @@ RUN cd /sgl-workspace/sglang \
           /tmp/minimax-h3-request-optimization.patch \
           /tmp/minimax-h3-temporal-dense-prefix.patch \
           /tmp/minimax-h3-static-lora-before-fp8.patch \
-          /tmp/minimax-h3-compile-ulysses-eager.patch
+          /tmp/minimax-h3-compile-ulysses-eager.patch \
+          /tmp/minimax-h3-cache-dit-residual-preservation.patch
 
 # Pin the upstream revision containing the Hopper/SM90 binding fix. --no-deps
 # prevents pip from replacing the CUDA/PyTorch stack already validated by SGLang.
