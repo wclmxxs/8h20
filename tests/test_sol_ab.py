@@ -56,6 +56,8 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert "startup LoRA must be fully merged before FP8" in static_lora_patch
     assert "torch.compiler.disable" in compile_ulysses_patch
     assert "_minimax_h3_attention_core_eager" in compile_ulysses_patch
+    assert "_minimax_h3_sp_all_gather_eager" in compile_ulysses_patch
+    assert "logits = _minimax_h3_sp_all_gather_eager" in compile_ulysses_patch
     assert "c10d functional" in compile_ulysses_patch
 
 
