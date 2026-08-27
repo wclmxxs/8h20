@@ -68,16 +68,19 @@ bash scripts/hotpatch_current_bernard_pod.sh restart
 
 也可执行 `bash scripts/hotpatch_current_bernard_pod.sh stop` 释放 GPU。只有首次启用调试模式需要构建并部署一次包含该能力的镜像；之后的 Python/API/启动脚本迭代不再需要构建镜像。SGLang 的 Python 源码补丁由调试脚本直接落到当前容器；CUDA 扩展、系统依赖或基础镜像变化仍必须重新构建。
 
-若目标 H20 节点的 NCCL transport 不支持 8 路 Ulysses all-to-all，可在当前
-Pod 内改用仍由单个请求占满 8 卡的 K/V-gather sequence parallel：
+若启动日志在 MiniMax-H3 attention 的 `all_to_all_single` 报 NCCL
+`unhandled cuda error`，先在当前 Pod 中禁用 NCCL GPU P2P，判断是否为节点
+P2P transport 问题：
 
 ```bash
-SEQUENCE_PARALLEL_MODE=kv_gather ENABLE_TORCH_COMPILE=0 bash scripts/hotpatch_current_bernard_pod.sh restart
+NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,GRAPH,COLL NCCL_P2P_DISABLE=1 ENABLE_TORCH_COMPILE=0 bash scripts/hotpatch_current_bernard_pod.sh restart
 ```
 
-该路径通过 `--kv-gather-degree 8` 让 query rows 保持本地、只交换 K/V
-all-gather，用于隔离 all-to-all transport 故障；验证通过后再单独恢复并测试
-`ENABLE_TORCH_COMPILE=1`。
+该诊断仍使用单请求 8 卡 Ulysses，只让 NCCL 绕开 GPU P2P transport。若启动
+成功，再判断是保留该兼容模式，还是修复节点 P2P 后恢复默认 transport；随后再
+单独恢复并测试 `ENABLE_TORCH_COMPILE=1`。当前固定版 SGLang 的原生 MiniMax-H3
+attention 即使传入 `--kv-gather-degree` 仍会回退到 Ulysses all-to-all，因此不将
+它作为 H20 transport 的规避方案。
 
 ## 自管 Docker Compose（保留的备用方式）
 

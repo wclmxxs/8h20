@@ -105,9 +105,6 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
     assert "NUM_GPUS=${NUM_GPUS:-8}" in launcher
     assert "TP=${TP:-1}" in launcher
     assert "ULYSSES=${ULYSSES:-8}" in launcher
-    assert "SEQUENCE_PARALLEL_MODE=${SEQUENCE_PARALLEL_MODE:-ulysses}" in launcher
-    assert "KV_GATHER_DEGREE=${KV_GATHER_DEGREE:-8}" in launcher
-    assert '--kv-gather-degree "${KV_GATHER_DEGREE}"' in launcher
     assert '--ulysses-degree "${ULYSSES}"' in launcher
     assert "--model-type diffusion" in launcher
     assert "transformer=sol_attn" in launcher
