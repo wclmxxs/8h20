@@ -175,7 +175,9 @@ def test_optimization_stack_applies_to_the_eight_gpu_worker(monkeypatch, tmp_pat
         assert env["SOL_ATTN_STRICT"] == "${SOL_ATTN_STRICT:-1}"
         assert env["WARMUP_STEPS"] == "${SOL_WARMUP_STEPS:-3}"
         assert env["QUANTIZATION"] == "${SOL_QUANTIZATION:-fp8}"
-        assert env["LORA_MERGE_MODE"] == "${SOL_LORA_MERGE_MODE:-dynamic}"
+        assert env["ENABLE_TORCH_COMPILE"] == "${SOL_ENABLE_TORCH_COMPILE:-1}"
+        assert env["LORA_MERGE_MODE"] == "${SOL_LORA_MERGE_MODE:-merge}"
+        assert env["SGLANG_DIFFUSION_LORA_BEFORE_FP8"] == "${SOL_LORA_BEFORE_FP8:-1}"
         assert env["SGLANG_CACHE_DIT_ENABLED"] == "${SOL_CACHE_DIT_ENABLED:-true}"
         assert env["SGLANG_CACHE_DIT_WARMUP"] == "${SOL_CACHE_DIT_WARMUP:-1}"
         assert env["SGLANG_CACHE_DIT_RDT"] == "${SOL_CACHE_DIT_RDT:-0.12}"
@@ -191,7 +193,9 @@ def test_optimization_stack_applies_to_the_eight_gpu_worker(monkeypatch, tmp_pat
     stack = config["deployment"]["optimization_stack"]
     assert stack["enabled"] is True
     assert stack["quantization"] == "fp8"
-    assert stack["lora_merge_mode"] == "dynamic"
+    assert stack["torch_compile"] == "1"
+    assert stack["lora_merge_mode"] == "merge"
+    assert stack["lora_before_fp8"] == "1"
     assert stack["cache_dit"] == {
         "enabled": "true",
         "fn": "1",

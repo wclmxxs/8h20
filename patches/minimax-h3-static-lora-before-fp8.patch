@@ -1,0 +1,133 @@
+Subject: [PATCH] diffusion: merge startup LoRA before online FP8
+
+Online FP8 normally runs while the transformer is loaded, before LoRAPipeline
+applies its startup adapter.  For a fixed adapter this both preserves the LoRA
+wrapper overhead and makes a later merge operate on already-quantized weights.
+
+Allow an explicit deployment mode to defer online FP8 until the startup LoRA
+has been merged into the BF16 base weights.  The pipeline fails closed unless
+the requested configuration is exactly startup LoRA + static merge + online
+FP8, then quantizes every deferred linear before warmup/compile can run.
+---
+--- a/python/sglang/multimodal_gen/runtime/layers/quantization/fp8.py
++++ b/python/sglang/multimodal_gen/runtime/layers/quantization/fp8.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import logging
++import os
+ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+ 
+ import torch
+@@ -310,6 +311,20 @@ class Fp8LinearMethod(LinearMethodBase):
+                 layer.register_parameter("input_scale", None)
+ 
+     def process_weights_after_loading(self, layer: Module) -> None:
++        defer_for_startup_lora = (
++            os.getenv("SGLANG_DIFFUSION_LORA_BEFORE_FP8", "0") == "1"
++        )
++        if defer_for_startup_lora and not getattr(
++            layer, "_sglang_finalize_deferred_fp8", False
++        ):
++            if self.quant_config.is_checkpoint_fp8_serialized:
++                raise ValueError(
++                    "SGLANG_DIFFUSION_LORA_BEFORE_FP8 requires online FP8 from "
++                    "BF16 weights, not a serialized FP8 checkpoint"
++                )
++            layer._sglang_deferred_fp8 = True
++            return
++
+         if self.block_quant:
+             # If ROCm, normalize the weights and scales to e4m3fnuz
+             if _is_fp8_fnuz:
+--- a/python/sglang/multimodal_gen/runtime/pipelines_core/lora_pipeline.py
++++ b/python/sglang/multimodal_gen/runtime/pipelines_core/lora_pipeline.py
+@@ -111,6 +111,7 @@ class LoRAPipeline(ComposedPipelineBase):
+                 self.lora_path,
+                 strength=self.server_args.lora_scale,  # type: ignore
+             )  # type: ignore
++            self._finalize_deferred_fp8_after_startup_lora()
+ 
+     def is_target_layer(self, module_name: str) -> bool:
+         if self.lora_target_modules is None:
+@@ -117,7 +118,80 @@ class LoRAPipeline(ComposedPipelineBase):
+             return True
+         return any(
+             target_name in module_name for target_name in self.lora_target_modules
+         )
++
++    def _finalize_deferred_fp8_after_startup_lora(self) -> None:
++        """Quantize the BF16 transformer only after its fixed LoRA is merged."""
++        if os.getenv("SGLANG_DIFFUSION_LORA_BEFORE_FP8", "0") != "1":
++            return
++        if getattr(self.server_args, "quantization", None) != "fp8":
++            raise ValueError(
++                "SGLANG_DIFFUSION_LORA_BEFORE_FP8 requires --quantization fp8"
++            )
++        if self.server_args.lora_merge_mode != "merge":
++            raise ValueError(
++                "SGLANG_DIFFUSION_LORA_BEFORE_FP8 requires "
++                "--lora-merge-mode merge"
++            )
++
++        startup_lora_layers: list[BaseLayerWithLoRA] = []
++        for layers in (
++            self.lora_layers,
++            self.lora_layers_transformer_2,
++            self.lora_layers_critic,
++        ):
++            startup_lora_layers.extend(
++                layer for layer in layers.values() if layer.lora_A is not None
++            )
++        if not startup_lora_layers:
++            raise RuntimeError(
++                "SGLANG_DIFFUSION_LORA_BEFORE_FP8 found no startup LoRA layers"
++            )
++        unmerged_count = sum(not layer.merged for layer in startup_lora_layers)
++        if unmerged_count:
++            raise RuntimeError(
++                "startup LoRA must be fully merged before FP8; "
++                f"found {unmerged_count} unmerged layers"
++            )
++
++        deferred_layers: list[torch.nn.Module] = []
++        seen: set[int] = set()
++        for component in self.modules.values():
++            if not isinstance(component, torch.nn.Module):
++                continue
++            for layer in component.modules():
++                if id(layer) in seen or not getattr(
++                    layer, "_sglang_deferred_fp8", False
++                ):
++                    continue
++                seen.add(id(layer))
++                deferred_layers.append(layer)
++        if not deferred_layers:
++            raise RuntimeError(
++                "SGLANG_DIFFUSION_LORA_BEFORE_FP8 found no deferred FP8 layers"
++            )
++
++        for layer in deferred_layers:
++            quant_method = getattr(layer, "quant_method", None)
++            if quant_method is None or not hasattr(
++                quant_method, "process_weights_after_loading"
++            ):
++                raise RuntimeError(
++                    "deferred FP8 layer is missing process_weights_after_loading"
++                )
++            layer._sglang_finalize_deferred_fp8 = True
++            try:
++                quant_method.process_weights_after_loading(layer)
++            finally:
++                delattr(layer, "_sglang_finalize_deferred_fp8")
++            delattr(layer, "_sglang_deferred_fp8")
++
++        logger.info(
++            "Finalized %d online FP8 layers after statically merging %d startup "
++            "LoRA layers",
++            len(deferred_layers),
++            len(startup_lora_layers),
++        )
+ 
+     def _get_target_lora_layers(
+         self, target: str

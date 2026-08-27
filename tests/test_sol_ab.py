@@ -27,9 +27,13 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     temporal_patch = (
         ROOT / "patches/minimax-h3-temporal-dense-prefix.patch"
     ).read_text()
+    static_lora_patch = (
+        ROOT / "patches/minimax-h3-static-lora-before-fp8.patch"
+    ).read_text()
 
     assert "minimax-h3-request-optimization.patch" in dockerfile
     assert "minimax-h3-temporal-dense-prefix.patch" in dockerfile
+    assert "minimax-h3-static-lora-before-fp8.patch" in dockerfile
     assert "minimax_h3_optimization" in patch
     assert "request_sol_attn_config" in patch
     assert "max_continuous_cached_steps" in patch
@@ -42,6 +46,10 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert 'runtime["_force_dense"] = True' in temporal_patch
     assert 'runtime["_sink_tokens"] = dense_prefix_rows' in temporal_patch
     assert "_dense_prefix_varlen" in temporal_patch
+    assert "_finalize_deferred_fp8_after_startup_lora" in static_lora_patch
+    assert "SGLANG_DIFFUSION_LORA_BEFORE_FP8" in static_lora_patch
+    assert "process_weights_after_loading(layer)" in static_lora_patch
+    assert "startup LoRA must be fully merged before FP8" in static_lora_patch
 
 
 def test_optimization_toggle_reinstalls_the_single_worker():
@@ -60,7 +68,9 @@ def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():
     assert '\"audio_vae\": \"fa\"' in script
     assert '\"video_vae\": \"fa\"' in script
     assert 'required_env QUANTIZATION "${SOL_QUANTIZATION}"' in script
+    assert 'required_env ENABLE_TORCH_COMPILE "${SOL_ENABLE_TORCH_COMPILE}"' in script
     assert 'required_env LORA_MERGE_MODE "${SOL_LORA_MERGE_MODE}"' in script
+    assert 'required_env SGLANG_DIFFUSION_LORA_BEFORE_FP8 "${SOL_LORA_BEFORE_FP8}"' in script
     assert 'required_env SGLANG_CACHE_DIT_ENABLED "${SOL_CACHE_DIT_ENABLED}"' in script
     assert 'required_env NUM_GPUS "8"' in script
     assert '"--model-type diffusion" in command' in script
@@ -68,6 +78,7 @@ def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():
     assert '"--tp-size 1" in command' in script
     assert '"--ulysses-degree 8" in command' in script
     assert "f\"--quantization {os.environ['QUANTIZATION']}\"" in script
+    assert '"--enable-torch-compile" in command' in script
     assert "f\"--lora-merge-mode {os.environ['LORA_MERGE_MODE']}\"" in script
     assert "import cache_dit" in script
     assert "Fp8Config.get_name()" in script
@@ -90,6 +101,7 @@ def test_install_preserves_tuned_defaults_and_migrates_the_h200_identity():
     ) in script
     assert "migrate_env_default SOL_CACHE_DIT_RDT 0.08 0.12" in script
     assert "migrate_env_default SOL_CACHE_DIT_MC 2 3" in script
+    assert "migrate_env_default SOL_LORA_MERGE_MODE dynamic merge" in script
     assert 'sglang_build_base_image} == "lmsysorg/sglang:dev"' in script
     assert "build_gpu_image docker/Dockerfile.sglang" in script
     assert "REBUILD_GPU_IMAGES=1 to rebuild" in script

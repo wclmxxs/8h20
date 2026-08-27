@@ -15,9 +15,9 @@
 ## 保留的优化
 
 - SGLang `fl2va`，支持 T2V、首帧、尾帧和首尾帧；明确拒绝 `ref2va`。
-- 固定 SGLang commit `c7c03ec53b` 和 OCI digest，继续应用 short-edge、请求级优化、temporal dense prefix / exact KV sink 三个补丁。
+- 固定 SGLang commit `c7c03ec53b` 和 OCI digest，继续应用 short-edge、请求级优化、temporal dense prefix / exact KV sink，并增加静态 LoRA-before-FP8 补丁。
 - 主 DiT 保留 Sol-Attn；文本编码器用 Torch SDPA，Audio/Video VAE 用 FlashAttention，避免组件后端串用。
-- 在线 FP8、动态 Turbo LoRA、Cache-DiT `Fn=1/Bn=0/W=1/R=0.12/MC=3` 全部保留。
+- Turbo LoRA 先在 FP32 中静态合入 BF16 基模，再执行在线 FP8；随后启用 `torch.compile`，并保留 Cache-DiT `Fn=1/Bn=0/W=1/R=0.12/MC=3`。
 - `sink_conditioning=exact_kv` 默认保持文本、首尾帧、参考素材和音频 conditioning KV 精确；可按请求启用 dense prefix。
 - SM90 SageAttention 构建、allocator `expandable_segments`、480/704 short edge、warmup resolutions、请求级优化覆盖、SSRF 防护、任务清理和业务 API 兼容层全部保留。
 
@@ -70,9 +70,9 @@ cd 8h20
 
 | 对外端口 | GPU | SGLang 拓扑 | 优化 |
 | --- | --- | --- | --- |
-| `30010` | `0,1,2,3,4,5,6,7` | `TP=1, Ulysses=8` | Sol-Attn + FP8 + Cache-DiT + 动态 LoRA |
+| `30010` | `0,1,2,3,4,5,6,7` | `TP=1, Ulysses=8` | Sol-Attn + 静态 LoRA→FP8 + torch.compile + Cache-DiT |
 
-安装脚本会严格验证实际进程包含 `--num-gpus 8 --tp-size 1 --ulysses-degree 8`，并校验 Sol/Cache-DiT/FP8 模块、环境和 DiT Sol 启动日志。任何一项没有真正生效都会退出。Sol SM90 kernel 会按 token shape 专门化，首次请求可能包含 JIT；稳态测速应固定 seed 和请求参数，连续运行两次并取第二次，同时检查视频和音频质量。
+安装脚本会严格验证实际进程包含 `--num-gpus 8 --tp-size 1 --ulysses-degree 8 --enable-torch-compile`，并校验静态 LoRA 已在 BF16 权重上合并、FP8 后处理发生在合并之后，以及 Sol/Cache-DiT 模块和 DiT Sol 启动日志。任何一项没有真正生效都会退出。torch.compile 与 Sol SM90 kernel 会按 token shape 专门化，首次启动/首个新 shape 会包含编译或 JIT；稳态测速应固定 seed 和请求参数，连续运行两次并取第二次，同时检查视频和音频质量。
 
 自管模式日志：
 
@@ -236,13 +236,15 @@ Content-Type: application/json
 | `WARMUP` | `864x480 1248x704 1344x768` | SGLang 启动预热规格 |
 | `ATTENTION_BACKEND` | `fa` | 所有组件的安全基础后端，避免 Audio/Video VAE 使用不支持的 SageAttention |
 | `COMPONENT_ATTENTION_BACKENDS` | `transformer=sage_attn` | 只把主去噪 transformer 切到 SageAttention |
-| `OPTIMIZATION_STACK_ENABLED` | `1` | 是否给唯一 8 卡 worker 启用 Sol-Attn + FP8 + Cache-DiT |
+| `OPTIMIZATION_STACK_ENABLED` | `1` | 是否给唯一 8 卡 worker 启用 Sol-Attn + 静态 LoRA→FP8 + torch.compile + Cache-DiT |
 | `SOL_COMPONENT_ATTENTION_BACKENDS` | `text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn` | H3 DiT 使用 Sol；install 会自动补齐并强制保护文本编码器及 Audio/Video VAE，避免旧 `.env` 或自定义值误用 Sol |
 | `SOL_ATTENTION_BACKEND_CONFIG` | `dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5` | Sol 激进稀疏配置；6 NFE 的全部 step 均进入稀疏路径 |
 | `SOL_ATTN_STRICT` | `1` | 禁止 Sol kernel 异常时静默回退为 dense，避免产生虚假测速结果 |
 | `SOL_WARMUP_STEPS` | `3` | 启动时执行 3 个 warmup step，覆盖 dense 和 sparse 两种 kernel 路径 |
-| `SOL_QUANTIZATION` | `fp8` | 在线量化主 transformer |
-| `SOL_LORA_MERGE_MODE` | `dynamic` | 动态应用 Turbo LoRA，不修改量化基模权重 |
+| `SOL_QUANTIZATION` | `fp8` | 在静态 LoRA 合并完成后在线量化主 transformer |
+| `SOL_ENABLE_TORCH_COMPILE` | `1` | 对合并并量化后的 transformer 开启 `torch.compile` |
+| `SOL_LORA_MERGE_MODE` | `merge` | 把固定 Turbo LoRA 静态合入基模权重 |
+| `SOL_LORA_BEFORE_FP8` | `1` | 延迟在线 FP8，强制执行 BF16 基模→FP32 LoRA 合并→FP8 的顺序 |
 | `SOL_CACHE_DIT_ENABLED` | `true` | 进程级启用 Cache-DiT |
 | `SOL_CACHE_DIT_WARMUP` | `1` | 仅首个去噪 step 强制完整计算 |
 | `SOL_CACHE_DIT_RDT` | `0.12` | 激进残差差异缓存阈值，允许更多复用 |
