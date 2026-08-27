@@ -109,7 +109,9 @@ def sglang_service(
         f"      NUM_GPUS: {GPUS_PER_SERVICE}",
         "      HF_HOME: /cache/huggingface",
         "      HF_HUB_CACHE: /cache/huggingface/hub",
-        '      PYTORCH_CUDA_ALLOC_CONF: "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"',
+        '      PYTORCH_CUDA_ALLOC_CONF: "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False}"',
+        '      NCCL_P2P_DISABLE: "${NCCL_P2P_DISABLE:-0}"',
+        '      NCCL_GRAPH_REGISTER: "${NCCL_GRAPH_REGISTER:-0}"',
         "      SGLANG_MINIMAX_H3_EXTRA_SHORT_EDGES: ${SHORT_EDGES:-480,704}",
     ]
     if sol_enabled:
@@ -121,7 +123,7 @@ def sglang_service(
                 '      SOL_ATTN_STRICT: "${SOL_ATTN_STRICT:-1}"',
                 '      WARMUP_STEPS: "${SOL_WARMUP_STEPS:-3}"',
                 '      QUANTIZATION: "${SOL_QUANTIZATION:-fp8}"',
-                '      ENABLE_TORCH_COMPILE: "${SOL_ENABLE_TORCH_COMPILE:-1}"',
+                '      ENABLE_TORCH_COMPILE: "${SOL_ENABLE_TORCH_COMPILE:-0}"',
                 '      LORA_MERGE_MODE: "${SOL_LORA_MERGE_MODE:-dynamic}"',
                 '      SGLANG_DIFFUSION_LORA_BEFORE_FP8: "${SOL_LORA_BEFORE_FP8:-0}"',
                 '      SGLANG_DIFFUSION_LORA_MERGE_FP32: "0"',
@@ -196,7 +198,7 @@ def api_service(
                 "      ATTENTION_BACKEND: sol_attn",
                 '      COMPONENT_ATTENTION_BACKENDS: "${SOL_COMPONENT_ATTENTION_BACKENDS:-text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn}"',
                 '      QUANTIZATION: "${SOL_QUANTIZATION:-fp8}"',
-                '      ENABLE_TORCH_COMPILE: "${SOL_ENABLE_TORCH_COMPILE:-1}"',
+                '      ENABLE_TORCH_COMPILE: "${SOL_ENABLE_TORCH_COMPILE:-0}"',
                 '      LORA_MERGE_MODE: "${SOL_LORA_MERGE_MODE:-dynamic}"',
                 '      SGLANG_DIFFUSION_LORA_BEFORE_FP8: "${SOL_LORA_BEFORE_FP8:-0}"',
                 '      SGLANG_DIFFUSION_LORA_MERGE_FP32: "0"',
@@ -409,7 +411,7 @@ def main() -> None:
                 "component_attention_backends": args.sol_component_attention_backends,
                 "attention_backend_config": args.sol_attention_backend_config,
                 "quantization": os.getenv("SOL_QUANTIZATION", "fp8"),
-                "torch_compile": os.getenv("SOL_ENABLE_TORCH_COMPILE", "1"),
+                "torch_compile": os.getenv("SOL_ENABLE_TORCH_COMPILE", "0"),
                 "lora_merge_mode": os.getenv("SOL_LORA_MERGE_MODE", "dynamic"),
                 "lora_before_fp8": os.getenv("SOL_LORA_BEFORE_FP8", "0"),
                 "cache_dit": {

@@ -148,7 +148,9 @@ set_env HOST_UID "$(id -u)"
 set_env HOST_GID "$(id -g)"
 set_env_default VIDEO_RETENTION_HOURS 12
 set_env_default CLEANUP_INTERVAL_SECONDS 600
-set_env_default PYTORCH_CUDA_ALLOC_CONF expandable_segments:True
+set_env_default PYTORCH_CUDA_ALLOC_CONF expandable_segments:False
+set_env_default NCCL_P2P_DISABLE 0
+set_env_default NCCL_GRAPH_REGISTER 0
 set_env_default WATCHDOG_ENABLED 1
 set_env_default WATCHDOG_INTERVAL_SECONDS 15
 set_env_default WATCHDOG_STALL_SECONDS 300
@@ -171,7 +173,7 @@ set_env_default SOL_ATTENTION_BACKEND_CONFIG dense_backend=sage_attn,dense_steps
 set_env_default SOL_ATTN_STRICT 1
 set_env_default SOL_WARMUP_STEPS 3
 set_env_default SOL_QUANTIZATION fp8
-set_env_default SOL_ENABLE_TORCH_COMPILE 1
+set_env_default SOL_ENABLE_TORCH_COMPILE 0
 set_env_default SOL_LORA_MERGE_MODE dynamic
 set_env_default SOL_LORA_BEFORE_FP8 0
 set_env_default SOL_CACHE_DIT_ENABLED true
@@ -184,6 +186,8 @@ set_env_default LORA_SIZE 779849816
 migrate_env_default ATTENTION_BACKEND sage_attn fa
 migrate_env_default COMPONENT_ATTENTION_BACKENDS text_encoder=torch_sdpa transformer=sage_attn
 migrate_env_default SOL_COMPONENT_ATTENTION_BACKENDS text_encoder=torch_sdpa,transformer=sol_attn text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn
+migrate_env_default PYTORCH_CUDA_ALLOC_CONF expandable_segments:True expandable_segments:False
+migrate_env_default SOL_ENABLE_TORCH_COMPILE 1 0
 migrate_env_default SOL_ATTENTION_BACKEND_CONFIG dense_backend=sage_attn,dense_steps=2,kv_splits=auto,tau=1.0 dense_backend=sage_attn,dense_steps=1,kv_splits=auto,tau=1.25
 migrate_env_default SOL_CACHE_DIT_WARMUP 2 1
 migrate_env_default SOL_CACHE_DIT_RDT 0.04 0.08

@@ -26,7 +26,10 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     assert "Sana.git@${SOL_ATTENTION_REVISION}" in dockerfile
     assert "COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa" in dockerfile
     assert "QUANTIZATION=fp8" in dockerfile
-    assert "ENABLE_TORCH_COMPILE=1" in dockerfile
+    assert "ENABLE_TORCH_COMPILE=0" in dockerfile
+    assert "NCCL_P2P_DISABLE=0" in dockerfile
+    assert "NCCL_GRAPH_REGISTER=0" in dockerfile
+    assert "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False" in dockerfile
     assert "LORA_MERGE_MODE=dynamic" in dockerfile
     assert "SGLANG_DIFFUSION_LORA_BEFORE_FP8=0" in dockerfile
     assert "SGLANG_DIFFUSION_LORA_MERGE_FP32=0" in dockerfile
@@ -122,7 +125,10 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
     assert "transformer=sol_attn" in launcher
     assert 'args+=(--attention-backend "${ATTENTION_BACKEND}")' not in launcher
     assert "SOL_QUANTIZATION:-fp8" in launcher
-    assert "SOL_ENABLE_TORCH_COMPILE:-1" in launcher
+    assert "SOL_ENABLE_TORCH_COMPILE:-0" in launcher
+    assert "NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}" in launcher
+    assert "NCCL_GRAPH_REGISTER=${NCCL_GRAPH_REGISTER:-0}" in launcher
+    assert "PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False" in launcher
     assert "SOL_LORA_MERGE_MODE:-dynamic" in launcher
     assert "SOL_LORA_BEFORE_FP8:-0" in launcher
     assert "SGLANG_DIFFUSION_LORA_MERGE_FP32=0" in launcher

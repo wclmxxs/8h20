@@ -20,7 +20,9 @@ from starlette.background import BackgroundTask
 
 from . import storage
 
-logger = logging.getLogger(__name__)
+# Uvicorn disables unrelated pre-existing loggers by default. Use its error
+# logger so upload source/timing diagnostics are visible in Bernard stdout.
+logger = logging.getLogger("uvicorn.error")
 
 SGLANG_URL = os.getenv("SGLANG_URL", "http://127.0.0.1:30020").rstrip("/")
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data")).resolve()
@@ -51,6 +53,17 @@ COMPONENT_ATTENTION_BACKENDS = os.getenv(
 )
 QUANTIZATION = os.getenv("QUANTIZATION", "")
 LORA_MERGE_MODE = os.getenv("LORA_MERGE_MODE", "auto")
+TORCH_COMPILE_ENABLED = os.getenv("ENABLE_TORCH_COMPILE", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+NCCL_P2P_DISABLE = os.getenv("NCCL_P2P_DISABLE", "0")
+NCCL_GRAPH_REGISTER = os.getenv("NCCL_GRAPH_REGISTER", "0")
+PYTORCH_CUDA_ALLOC_CONF = os.getenv(
+    "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:False"
+)
 CACHE_DIT_ENABLED = os.getenv("SGLANG_CACHE_DIT_ENABLED", "false").lower() in {
     "1",
     "true",
@@ -544,6 +557,10 @@ async def healthz(_: None = Depends(require_api_key)) -> dict[str, Any]:
             "component_attention_backends": COMPONENT_ATTENTION_BACKENDS,
             "quantization": QUANTIZATION or None,
             "lora_merge_mode": LORA_MERGE_MODE,
+            "torch_compile_enabled": TORCH_COMPILE_ENABLED,
+            "nccl_p2p_disable": NCCL_P2P_DISABLE,
+            "nccl_graph_register": NCCL_GRAPH_REGISTER,
+            "pytorch_cuda_alloc_conf": PYTORCH_CUDA_ALLOC_CONF,
             "cache_dit_enabled": CACHE_DIT_ENABLED,
             "cache_dit_config": CACHE_DIT_CONFIG if CACHE_DIT_ENABLED else None,
             "output_storage": storage.describe(),

@@ -17,7 +17,7 @@
 - SGLang `fl2va`，支持 T2V、首帧、尾帧和首尾帧；明确拒绝 `ref2va`。
 - 固定 SGLang commit `c7c03ec53b` 和 OCI digest，继续应用 short-edge、请求级优化、temporal dense prefix / exact KV sink，并使用 FP8 基模叠加 dynamic LoRA 残差。
 - 主 DiT 在模型加载的组件上下文中立即解析为 Sol-Attn；文本编码器用 Torch SDPA，Audio/Video VAE 用 FlashAttention，避免延迟解析回退或组件后端串用。
-- 基模 transformer 在线量化为 FP8，Turbo LoRA 保持为独立 dynamic 残差；随后启用 `torch.compile`。Ulysses/Ring 的动态 attention、每层 `all_to_all` 和最终 SP `all_gather` 保持 eager，避免不同视频 shape 的 collective 被 Inductor 专门化后触发 NCCL 错误；其余投影、归一化、残差和 MLP 继续编译，并保留 Cache-DiT `Fn=1/Bn=0/W=1/R=0.12/MC=3`。
+- 基模 transformer 在线量化为 FP8，Turbo LoRA 保持为独立 dynamic 残差。H20 实测 `torch.compile` 会增加稳态延迟且使 8 路 Ulysses collective 更脆弱，因此正式默认关闭；相关 eager collective 补丁仍保留，允许后续显式开启复测。Cache-DiT 保留 `Fn=1/Bn=0/W=1/R=0.12/MC=3` 进程默认与完整请求级覆盖。
 - `sink_conditioning=exact_kv` 默认保持文本、首尾帧、参考素材和音频 conditioning KV 精确；可按请求启用 dense prefix。
 - SM90 SageAttention 构建、allocator `expandable_segments`、480/704 short edge、warmup resolutions、请求级优化覆盖、SSRF 防护、任务清理和业务 API 兼容层全部保留。
 
@@ -279,13 +279,13 @@ Content-Type: application/json
 | `WARMUP` | `864x480 1248x704 1344x768` | SGLang 启动预热规格 |
 | `ATTENTION_BACKEND` | `fa` | 所有组件的安全基础后端，避免 Audio/Video VAE 使用不支持的 SageAttention |
 | `COMPONENT_ATTENTION_BACKENDS` | `transformer=sage_attn` | 只把主去噪 transformer 切到 SageAttention |
-| `OPTIMIZATION_STACK_ENABLED` | `1` | 是否给唯一 8 卡 worker 启用 Sol-Attn + FP8 基模/dynamic LoRA + torch.compile + Cache-DiT |
+| `OPTIMIZATION_STACK_ENABLED` | `1` | 是否给唯一 8 卡 worker 启用 Sol-Attn + FP8 基模/dynamic LoRA + Cache-DiT |
 | `SOL_COMPONENT_ATTENTION_BACKENDS` | `text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn` | H3 DiT 使用 Sol；install 会自动补齐并强制保护文本编码器及 Audio/Video VAE，避免旧 `.env` 或自定义值误用 Sol |
 | `SOL_ATTENTION_BACKEND_CONFIG` | `dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5` | Sol 激进稀疏配置；6 NFE 的全部 step 均进入稀疏路径 |
 | `SOL_ATTN_STRICT` | `1` | 禁止 Sol kernel 异常时静默回退为 dense，避免产生虚假测速结果 |
 | `SOL_WARMUP_STEPS` | `3` | 启动时执行 3 个 warmup step，覆盖 dense 和 sparse 两种 kernel 路径 |
 | `SOL_QUANTIZATION` | `fp8` | 在线量化基模 transformer，LoRA 不合入量化权重 |
-| `SOL_ENABLE_TORCH_COMPILE` | `1` | 对 FP8 基模 transformer 开启 `torch.compile` |
+| `SOL_ENABLE_TORCH_COMPILE` | `0` | H20 稳态实测更快且更稳定；保留显式开启复测能力 |
 | `SOL_LORA_MERGE_MODE` | `dynamic` | 保留 Turbo LoRA 为独立动态残差，避免静态合并后重新量化造成的画面发糊 |
 | `SOL_LORA_BEFORE_FP8` | `0` | 禁止延迟 FP8 和静态 LoRA 合并路径 |
 | `SOL_CACHE_DIT_ENABLED` | `true` | 进程级启用 Cache-DiT |
@@ -296,7 +296,9 @@ Content-Type: application/json
 | `PUBLIC_BASE_URL` | 自动发现 | Bernard 默认优先选择实例的全局 IPv6，并结合动态 `PORT` 返回临时视频直链；显式设置时保持指定地址 |
 | `PUBLIC_ADVERTISE_IP` | 空 | 可覆盖自动发现的实例地址；IPv6 会自动按 URL 规范添加方括号 |
 | `VIDEO_RETENTION_HOURS` | `12` | 视频和对应任务元数据保留时间 |
-| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | 减少跨请求显存碎片和可恢复性 OOM |
+| `NCCL_P2P_DISABLE` | `0` | 保持节点内 GPU P2P transport，避免禁用后 8 卡 Ulysses 明显变慢 |
+| `NCCL_GRAPH_REGISTER` | `0` | 禁用 NCCL graph buffer registration，匹配已验证的 H20 稳定配置 |
+| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:False` | 匹配已验证的 NCCL/allocator 组合 |
 | `WATCHDOG_STALL_SECONDS` | `300` | 有活跃任务但没有状态推进多久后重启对应 worker |
 | `WATCHDOG_RESTART_COOLDOWN_SECONDS` | `300` | 自管 worker 两次自动重启之间的最短间隔 |
 | `CLEANUP_INTERVAL_SECONDS` | `600` | 清理任务执行间隔；实际删除可能比 12 小时最多晚约 10 分钟 |

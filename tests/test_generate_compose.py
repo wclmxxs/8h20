@@ -99,8 +99,10 @@ def test_main_renders_one_registered_service_over_all_eight_gpus(monkeypatch, tm
         compose["services"]["h3-sglang-0"]["environment"][
             "PYTORCH_CUDA_ALLOC_CONF"
         ]
-        == "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+        == "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False}"
     )
+    assert compose["services"]["h3-sglang-0"]["environment"]["NCCL_P2P_DISABLE"] == "${NCCL_P2P_DISABLE:-0}"
+    assert compose["services"]["h3-sglang-0"]["environment"]["NCCL_GRAPH_REGISTER"] == "${NCCL_GRAPH_REGISTER:-0}"
     watchdog = compose["services"]["h3-watchdog"]
     assert watchdog["image"] == "${WATCHDOG_IMAGE}"
     assert "/var/run/docker.sock:/var/run/docker.sock" in watchdog["volumes"]
@@ -175,7 +177,7 @@ def test_optimization_stack_applies_to_the_eight_gpu_worker(monkeypatch, tmp_pat
         assert env["SOL_ATTN_STRICT"] == "${SOL_ATTN_STRICT:-1}"
         assert env["WARMUP_STEPS"] == "${SOL_WARMUP_STEPS:-3}"
         assert env["QUANTIZATION"] == "${SOL_QUANTIZATION:-fp8}"
-        assert env["ENABLE_TORCH_COMPILE"] == "${SOL_ENABLE_TORCH_COMPILE:-1}"
+        assert env["ENABLE_TORCH_COMPILE"] == "${SOL_ENABLE_TORCH_COMPILE:-0}"
         assert env["LORA_MERGE_MODE"] == "${SOL_LORA_MERGE_MODE:-dynamic}"
         assert env["SGLANG_DIFFUSION_LORA_BEFORE_FP8"] == "${SOL_LORA_BEFORE_FP8:-0}"
         assert env["SGLANG_DIFFUSION_LORA_MERGE_FP32"] == "0"
@@ -199,7 +201,7 @@ def test_optimization_stack_applies_to_the_eight_gpu_worker(monkeypatch, tmp_pat
     stack = config["deployment"]["optimization_stack"]
     assert stack["enabled"] is True
     assert stack["quantization"] == "fp8"
-    assert stack["torch_compile"] == "1"
+    assert stack["torch_compile"] == "0"
     assert stack["lora_merge_mode"] == "dynamic"
     assert stack["lora_before_fp8"] == "0"
     assert stack["cache_dit"] == {
