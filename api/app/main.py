@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import secrets
@@ -19,10 +20,18 @@ from starlette.background import BackgroundTask
 
 from . import storage
 
+logger = logging.getLogger(__name__)
+
 SGLANG_URL = os.getenv("SGLANG_URL", "http://127.0.0.1:30020").rstrip("/")
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data")).resolve()
 JOB_ROOT = DATA_ROOT / "jobs"
 UPLOAD_TMP_ROOT = DATA_ROOT / "tos-upload-tmp"
+_SGLANG_OUTPUT_ROOT_TEXT = os.getenv("SGLANG_OUTPUT_PATH") or os.getenv(
+    "OUTPUT_PATH", ""
+)
+SGLANG_OUTPUT_ROOT = (
+    Path(_SGLANG_OUTPUT_ROOT_TEXT).resolve() if _SGLANG_OUTPUT_ROOT_TEXT else None
+)
 API_KEY = os.getenv("API_KEY", "")
 MODEL_NAME = os.getenv("BUSINESS_MODEL", "MiniMax-H3")
 GPU_GROUP_INDEX = int(os.getenv("GPU_GROUP_INDEX", "0"))
@@ -301,6 +310,20 @@ async def download_upstream_content(task_id: str, destination: Path) -> None:
         ) from exc
 
 
+def local_upstream_content(task_id: str) -> Path | None:
+    """Return the completed SGLang output when API and worker share storage."""
+    validate_task_id(task_id)
+    if SGLANG_OUTPUT_ROOT is None:
+        return None
+    candidate = SGLANG_OUTPUT_ROOT / f"{task_id}.mp4"
+    try:
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+    except OSError:
+        return None
+    return None
+
+
 async def ensure_tos_output(task_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
     if (metadata.get("_storage") or {}).get("url"):
         return metadata
@@ -311,29 +334,59 @@ async def ensure_tos_output(task_id: str, metadata: dict[str, Any]) -> dict[str,
         if (latest.get("_storage") or {}).get("url"):
             return latest
 
-        UPLOAD_TMP_ROOT.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{task_id}.", suffix=".mp4", dir=UPLOAD_TMP_ROOT
-        )
-        os.close(descriptor)
-        temporary = Path(temporary_name)
+        source = local_upstream_content(task_id)
+        temporary: Path | None = None
         try:
-            await download_upstream_content(task_id, temporary)
+            if source is None:
+                UPLOAD_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=f".{task_id}.", suffix=".mp4", dir=UPLOAD_TMP_ROOT
+                )
+                os.close(descriptor)
+                temporary = Path(temporary_name)
+                await download_upstream_content(task_id, temporary)
+                source = temporary
+                upload_source = "upstream_http_fallback"
+                logger.info(
+                    "TOS upload using upstream HTTP fallback: task_id=%s path=%s",
+                    task_id,
+                    source,
+                )
+            else:
+                upload_source = "local_sglang_output"
+                logger.info(
+                    "TOS upload using local SGLang output: task_id=%s path=%s",
+                    task_id,
+                    source,
+                )
+            upload_started = time.perf_counter()
             try:
                 published = await asyncio.to_thread(
-                    storage.publish_file, temporary, task_id
+                    storage.publish_file, source, task_id
                 )
             except Exception as exc:
                 raise HTTPException(
                     status_code=502,
                     detail=f"TOS upload failed: {type(exc).__name__}",
                 ) from exc
+            upload_time_s = time.perf_counter() - upload_started
+            published["source"] = upload_source
+            published["upload_time_s"] = round(upload_time_s, 3)
             published["uploaded_at"] = int(time.time())
+            logger.info(
+                "TOS upload completed: task_id=%s source=%s size=%s "
+                "upload_time_s=%.3f",
+                task_id,
+                upload_source,
+                published.get("size", "unknown"),
+                upload_time_s,
+            )
             latest["_storage"] = published
             save_metadata(task_id, latest)
             return latest
         finally:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
 
 async def delete_upstream(task_id: str) -> dict[str, Any]:

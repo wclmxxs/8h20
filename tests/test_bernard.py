@@ -82,6 +82,14 @@ def test_bernard_debug_hold_keeps_pid1_alive_and_healthcheck_green():
     assert "signal.SIGTERM" in holder
 
 
+def test_hotpatch_can_restart_only_the_api_for_gateway_changes():
+    hotpatch = (ROOT / "scripts/hotpatch_current_bernard_pod.sh").read_text()
+
+    assert "restart-api" in hotpatch
+    assert "SGLang was left running" in hotpatch
+    assert "stop_api_service" in hotpatch
+
+
 def test_bernard_image_verifies_the_api_module_entrypoint():
     dockerfile = (ROOT / "docker/Dockerfile.bernard").read_text()
 

@@ -108,7 +108,7 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "MODEL=${model_root}" in script
     assert "${repo_root}/scripts/launch_sglang.sh" in script
     assert '"${repo_root}/api/run_dual_stack.py"' in script
-    assert "start|stop|restart|status" in script
+    assert "start|stop|restart|restart-api|status" in script
     assert "warmup continues in the background" in script
 
 

@@ -21,8 +21,8 @@ die() {
 }
 
 case ${action} in
-  start|stop|restart|status) ;;
-  *) die "usage: $0 [start|stop|restart|status]" ;;
+  start|stop|restart|restart-api|status) ;;
+  *) die "usage: $0 [start|stop|restart|restart-api|status]" ;;
 esac
 if (( EUID != 0 )); then
   die "run this script as root inside the Bernard Pod"
@@ -47,6 +47,15 @@ find_service_roots() {
   while read -r pid command; do
     if [[ ${command} == *"/usr/local/bin/sglang serve"* ]] \
       || [[ ${command} == *"/run_dual_stack.py"* ]]; then
+      process_is_live "${pid}" && printf '%s\n' "${pid}"
+    fi
+  done < <(ps -eo pid=,args=)
+}
+
+find_api_roots() {
+  local pid command
+  while read -r pid command; do
+    if [[ ${command} == *"/run_dual_stack.py"* ]]; then
       process_is_live "${pid}" && printf '%s\n' "${pid}"
     fi
   done < <(ps -eo pid=,args=)
@@ -93,6 +102,41 @@ stop_services() {
   done
   if (( ${#survivors[@]} > 0 )); then
     echo "Force-stopping remaining PIDs: ${survivors[*]}"
+    kill -KILL "${survivors[@]}" 2>/dev/null || true
+  fi
+}
+
+stop_api_service() {
+  local root_pid child_pid pid
+  local -a roots=()
+  local -a service_pids=()
+  local -a survivors=()
+
+  mapfile -t roots < <(find_api_roots | sort -nu)
+  if (( ${#roots[@]} == 0 )); then
+    echo "No live debug API process found."
+    return
+  fi
+  for root_pid in "${roots[@]}"; do
+    while read -r child_pid; do
+      [[ -n ${child_pid} ]] && service_pids+=("${child_pid}")
+    done < <(collect_descendants "${root_pid}")
+  done
+  mapfile -t service_pids < <(printf '%s\n' "${service_pids[@]}" | sort -nu)
+
+  echo "Stopping debug API PIDs: ${service_pids[*]}"
+  kill -TERM "${service_pids[@]}" 2>/dev/null || true
+  deadline=$((SECONDS + 30))
+  while (( SECONDS < deadline )); do
+    survivors=()
+    for pid in "${service_pids[@]}"; do
+      process_is_live "${pid}" && survivors+=("${pid}")
+    done
+    (( ${#survivors[@]} == 0 )) && break
+    sleep 1
+  done
+  if (( ${#survivors[@]} > 0 )); then
+    echo "Force-stopping remaining API PIDs: ${survivors[*]}"
     kill -KILL "${survivors[@]}" 2>/dev/null || true
   fi
 }
@@ -270,6 +314,26 @@ status_services() {
   return "${failed}"
 }
 
+restart_api_service() {
+  local api_pid
+
+  export_runtime
+  curl -fsS --max-time 5 "http://127.0.0.1:${sglang_port}/health" >/dev/null \
+    || die "SGLang is not healthy on port ${sglang_port}"
+  stop_api_service
+  : >"${api_log}"
+  nohup setsid /opt/minimax-h3/api-venv/bin/python \
+    "${repo_root}/api/run_dual_stack.py" >"${api_log}" 2>&1 </dev/null &
+  api_pid=$!
+  sleep 3
+  process_is_live "${api_pid}" || {
+    tail -n 80 "${api_log}" >&2 || true
+    die "API exited immediately"
+  }
+  echo "RESTARTED API: PID ${api_pid}; SGLang was left running"
+  echo "API log: ${api_log}"
+}
+
 case ${action} in
   start)
     apply_runtime_patch
@@ -282,6 +346,9 @@ case ${action} in
     apply_runtime_patch
     stop_services
     start_services
+    ;;
+  restart-api)
+    restart_api_service
     ;;
   status)
     status_services
