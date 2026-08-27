@@ -16,7 +16,7 @@
 
 - SGLang `fl2va`，支持 T2V、首帧、尾帧和首尾帧；明确拒绝 `ref2va`。
 - 固定 SGLang commit `c7c03ec53b` 和 OCI digest，继续应用 short-edge、请求级优化、temporal dense prefix / exact KV sink，并使用 FP8 基模叠加 dynamic LoRA 残差。
-- 主 DiT 保留 Sol-Attn；文本编码器用 Torch SDPA，Audio/Video VAE 用 FlashAttention，避免组件后端串用。
+- 主 DiT 在模型加载的组件上下文中立即解析为 Sol-Attn；文本编码器用 Torch SDPA，Audio/Video VAE 用 FlashAttention，避免延迟解析回退或组件后端串用。
 - 基模 transformer 在线量化为 FP8，Turbo LoRA 保持为独立 dynamic 残差；随后启用 `torch.compile`。Ulysses/Ring 的动态 attention、每层 `all_to_all` 和最终 SP `all_gather` 保持 eager，避免不同视频 shape 的 collective 被 Inductor 专门化后触发 NCCL 错误；其余投影、归一化、残差和 MLP 继续编译，并保留 Cache-DiT `Fn=1/Bn=0/W=1/R=0.12/MC=3`。
 - `sink_conditioning=exact_kv` 默认保持文本、首尾帧、参考素材和音频 conditioning KV 精确；可按请求启用 dense prefix。
 - SM90 SageAttention 构建、allocator `expandable_segments`、480/704 short edge、warmup resolutions、请求级优化覆盖、SSRF 防护、任务清理和业务 API 兼容层全部保留。

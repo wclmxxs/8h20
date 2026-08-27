@@ -1,0 +1,14 @@
+diff --git a/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py b/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
+--- a/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
++++ b/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
+@@ -1235,6 +1235,9 @@ class MiniMaxH3DiTModel(BaseDiT):
+             prefix="final_layer",
+         )
+         self._resolved_attention_backend: AttentionBackendEnum | None = None
+         self._mark_missing_params_required()
++        # Component backend overrides are scoped to model loading. Resolve before
++        # a lazy first forward can silently fall back after that context exits.
++        self._resolve_attention_backend_once()
+ 
+     def set_cache_dit_input_preservation(self, enabled: bool) -> None:
+         """Stop the blocks from overwriting the input Cache-DiT holds by reference.

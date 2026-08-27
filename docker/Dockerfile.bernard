@@ -17,6 +17,7 @@ COPY patches/minimax-h3-request-optimization.patch /tmp/minimax-h3-request-optim
 COPY patches/minimax-h3-temporal-dense-prefix.patch /tmp/minimax-h3-temporal-dense-prefix.patch
 COPY patches/minimax-h3-compile-ulysses-eager.patch /tmp/minimax-h3-compile-ulysses-eager.patch
 COPY patches/minimax-h3-cache-dit-residual-preservation.patch /tmp/minimax-h3-cache-dit-residual-preservation.patch
+COPY patches/minimax-h3-eager-component-attention-backend.patch /tmp/minimax-h3-eager-component-attention-backend.patch
 COPY patches/minimax-h3-sol-attn-path-observability.patch /tmp/minimax-h3-sol-attn-path-observability.patch
 RUN cd /sgl-workspace/sglang \
     && actual_commit="$(git rev-parse --short=10 HEAD)" \
@@ -27,6 +28,7 @@ RUN cd /sgl-workspace/sglang \
          /tmp/minimax-h3-temporal-dense-prefix.patch \
          /tmp/minimax-h3-compile-ulysses-eager.patch \
          /tmp/minimax-h3-cache-dit-residual-preservation.patch \
+         /tmp/minimax-h3-eager-component-attention-backend.patch \
          /tmp/minimax-h3-sol-attn-path-observability.patch; do \
          if git apply -p1 --check "${patch}"; then \
            git apply -p1 "${patch}"; \

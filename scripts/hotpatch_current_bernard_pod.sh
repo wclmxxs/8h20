@@ -101,6 +101,7 @@ apply_runtime_patch() {
   local runtime_source backup runtime_patch static_lora_patch
   local -a runtime_patches=(
     "${repo_root}/patches/minimax-h3-cache-dit-residual-preservation.patch"
+    "${repo_root}/patches/minimax-h3-eager-component-attention-backend.patch"
     "${repo_root}/patches/minimax-h3-sol-attn-path-observability.patch"
   )
 
