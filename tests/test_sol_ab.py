@@ -56,7 +56,9 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert "startup LoRA must be fully merged before FP8" in static_lora_patch
     assert "torch.compiler.disable" in compile_ulysses_patch
     assert "_minimax_h3_attention_core_eager" in compile_ulysses_patch
+    assert "_minimax_h3_sp_all_gather_compiler_eager" in compile_ulysses_patch
     assert "_minimax_h3_sp_all_gather_eager" in compile_ulysses_patch
+    assert "eager_on_graph(True)(" in compile_ulysses_patch
     assert "logits = _minimax_h3_sp_all_gather_eager" in compile_ulysses_patch
     assert "c10d functional" in compile_ulysses_patch
 
@@ -67,6 +69,18 @@ def test_optimization_toggle_reinstalls_the_single_worker():
     assert "set_env OPTIMIZATION_STACK_ENABLED 0" in script
     assert "on the single 8-H20 worker" in script
     assert "exec ./install.sh" in script
+
+
+def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
+    script = (ROOT / "scripts/hotpatch_current_bernard_pod.sh").read_text()
+    assert "inspect.getsourcefile" in script
+    assert "_minimax_h3_sp_all_gather_compiler_eager" in script
+    assert "eager_on_graph(True)" in script
+    assert "kill -STOP 1" in script
+    assert "MODEL=${model_root}" in script
+    assert "/opt/minimax-h3/bin/launch_sglang.sh" in script
+    assert "/opt/minimax-h3/api/run_dual_stack.py" in script
+    assert "Do not run 'kill -CONT 1'" in script
 
 
 def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():

@@ -39,6 +39,22 @@ Bernard 镜像在构建阶段下载并按固定 revision、大小和 SHA256 校�
 
 Bernard 模式不启动自注册 Reporter、Docker-socket Watchdog 或 cleaner 容器；平台负责实例注册/健康重建，业务 API 仍把视频与任务元数据写到 `DATA_ROOT`。
 
+### 当前 Bernard Pod 内热更新（仅用于测试）
+
+短期验证 SGLang Python 改动不需要构建镜像。在 Pod WebShell 内拉取本仓库并执行：
+
+```bash
+cd /tmp
+git clone https://github.com/wclmxxs/8h20.git minimaxh3-8h20-hotpatch
+cd minimaxh3-8h20-hotpatch
+git pull --ff-only
+./scripts/hotpatch_current_bernard_pod.sh
+```
+
+脚本会定位当前进程实际导入的 `minimax_h3.py`、保留一份原文件、应用最终 SP `all_gather` 的 CUDA Graph eager 修复，然后只替换 SGLang 和 API 子进程。它直接复用 `/opt/tiger/csde/MiniMax-H3`，不会重新下载模型，也不会构建镜像。重启期间实例会暂时不健康；同一组 8 张 H20 无法在保留旧 SGLang GPU 进程的同时再完整启动一份 H3。
+
+这是临时测试方式：脚本会暂停原 PID 1，避免其 `wait -n` 因旧子进程退出而终止容器；不要执行 `kill -CONT 1`。测试结束后正常重启 Pod，或部署包含同一修复的正式镜像，以恢复平台进程托管。`git pull` 本身不会修改镜像里已经安装的 SGLang，因此不能省略热更新脚本。
+
 ## 自管 Docker Compose（保留的备用方式）
 
 `install.sh` 保留原项目的 AWS/DLAMI 自管能力，但已改成单个 8×H20 worker，并会强校验 `SERVICE_ID=Minimax-H3-Lora-H20`、GPU 数量、GPU 型号与 TP/Ulysses 拓扑：
