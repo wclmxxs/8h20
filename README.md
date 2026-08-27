@@ -68,6 +68,17 @@ bash scripts/hotpatch_current_bernard_pod.sh restart
 
 也可执行 `bash scripts/hotpatch_current_bernard_pod.sh stop` 释放 GPU。只有首次启用调试模式需要构建并部署一次包含该能力的镜像；之后的 Python/API/启动脚本迭代不再需要构建镜像。SGLang 的 Python 源码补丁由调试脚本直接落到当前容器；CUDA 扩展、系统依赖或基础镜像变化仍必须重新构建。
 
+若目标 H20 节点的 NCCL transport 不支持 8 路 Ulysses all-to-all，可在当前
+Pod 内改用仍由单个请求占满 8 卡的 K/V-gather sequence parallel：
+
+```bash
+SEQUENCE_PARALLEL_MODE=kv_gather ENABLE_TORCH_COMPILE=0 bash scripts/hotpatch_current_bernard_pod.sh restart
+```
+
+该路径通过 `--kv-gather-degree 8` 让 query rows 保持本地、只交换 K/V
+all-gather，用于隔离 all-to-all transport 故障；验证通过后再单独恢复并测试
+`ENABLE_TORCH_COMPILE=1`。
+
 ## 自管 Docker Compose（保留的备用方式）
 
 `install.sh` 保留原项目的 AWS/DLAMI 自管能力，但已改成单个 8×H20 worker，并会强校验 `SERVICE_ID=Minimax-H3-Lora-H20`、GPU 数量、GPU 型号与 TP/Ulysses 拓扑：

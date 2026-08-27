@@ -4,6 +4,8 @@ set -euo pipefail
 NUM_GPUS=${NUM_GPUS:-8}
 TP=${TP:-1}
 ULYSSES=${ULYSSES:-8}
+SEQUENCE_PARALLEL_MODE=${SEQUENCE_PARALLEL_MODE:-ulysses}
+KV_GATHER_DEGREE=${KV_GATHER_DEGREE:-8}
 ENCODER_PARALLEL=${ENCODER_PARALLEL:-auto}
 CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/MiniMax-H3}
 MODEL_VARIANT=${MODEL_VARIANT:-fl2va}
@@ -12,10 +14,28 @@ SGLANG_PORT=${SGLANG_PORT:-30020}
 OUTPUT_PATH=${OUTPUT_PATH:-/out/videos}
 OPTIMIZATION_STACK_ENABLED=${OPTIMIZATION_STACK_ENABLED:-1}
 
-if [[ ${NUM_GPUS} != 8 || ${TP} != 1 || ${ULYSSES} != 8 ]]; then
-  echo "MiniMax H3 H20 topology must be NUM_GPUS=8, TP=1, ULYSSES=8; got ${NUM_GPUS}/${TP}/${ULYSSES}" >&2
+if [[ ${NUM_GPUS} != 8 || ${TP} != 1 ]]; then
+  echo "MiniMax H3 H20 topology must be NUM_GPUS=8 and TP=1; got ${NUM_GPUS}/${TP}" >&2
   exit 1
 fi
+case ${SEQUENCE_PARALLEL_MODE} in
+  ulysses)
+    [[ ${ULYSSES} == 8 ]] || {
+      echo "Ulysses mode requires ULYSSES=8; got ${ULYSSES}" >&2
+      exit 1
+    }
+    ;;
+  kv_gather)
+    [[ ${KV_GATHER_DEGREE} == 8 ]] || {
+      echo "KV-gather mode requires KV_GATHER_DEGREE=8; got ${KV_GATHER_DEGREE}" >&2
+      exit 1
+    }
+    ;;
+  *)
+    echo "SEQUENCE_PARALLEL_MODE must be ulysses or kv_gather; got ${SEQUENCE_PARALLEL_MODE}" >&2
+    exit 1
+    ;;
+esac
 
 # The Bernard entrypoint localizes the HDFS MODEL_PATH into a directory whose
 # name retains the MiniMax-H3 identity. MODEL remains an explicit override; a
@@ -133,7 +153,6 @@ args=(
   --model-variant "${MODEL_VARIANT}"
   --num-gpus "${NUM_GPUS}"
   --tp-size "${TP}"
-  --ulysses-degree "${ULYSSES}"
   --performance-mode speed
   --encoder-parallel "${ENCODER_PARALLEL}"
   --lora-path "${lora_path}"
@@ -145,6 +164,15 @@ args=(
   --host "${SGLANG_HOST}"
   --port "${SGLANG_PORT}"
 )
+
+if [[ ${SEQUENCE_PARALLEL_MODE} == kv_gather ]]; then
+  # H20 clusters whose NCCL transport rejects all-to-all can still shard one
+  # request across all eight GPUs. K/V-gather keeps query rows local and uses
+  # an all-gather exchange instead of Ulysses all-to-all.
+  args+=(--kv-gather-degree "${KV_GATHER_DEGREE}")
+else
+  args+=(--ulysses-degree "${ULYSSES}")
+fi
 
 # MiniMax H3 resolves its DiT backend from the component map below.  Keep the
 # profile marker out of the top-level backend flag: the model needs different

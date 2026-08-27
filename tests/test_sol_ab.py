@@ -80,6 +80,8 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "process_is_live" in script
     assert "json.load(sys.stdin).get(\"ok\") is True" in script
     assert "API: waiting for SGLang or failed" in script
+    assert "SGLang: warmup failed" in script
+    assert 'grep -Fq "NCCL Error"' in script
     assert "MODEL=${model_root}" in script
     assert "${repo_root}/scripts/launch_sglang.sh" in script
     assert '"${repo_root}/api/run_dual_stack.py"' in script

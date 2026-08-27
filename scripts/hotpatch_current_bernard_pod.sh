@@ -211,14 +211,20 @@ start_services() {
 
 status_services() {
   local failed=0
+  local sglang_healthy=0
   local -a roots=()
   local -a headers=()
 
   mapfile -t roots < <(find_service_roots | sort -nu)
   echo "Live service root PIDs: ${roots[*]:-none}"
-  if curl -fsS --max-time 5 "http://127.0.0.1:${sglang_port}/health" \
+  if grep -Fq "Synthetic server warmup failed" "${sglang_log}" 2>/dev/null \
+    || grep -Fq "NCCL Error" "${sglang_log}" 2>/dev/null; then
+    echo "SGLang: warmup failed (see ${sglang_log})"
+    failed=1
+  elif curl -fsS --max-time 5 "http://127.0.0.1:${sglang_port}/health" \
     >/dev/null 2>&1; then
     echo "SGLang: healthy"
+    sglang_healthy=1
   else
     echo "SGLang: starting or failed (see ${sglang_log})"
     failed=1
@@ -226,7 +232,7 @@ status_services() {
   if [[ -n ${API_KEY:-} ]]; then
     headers=(-H "Authorization: Bearer ${API_KEY}")
   fi
-  if curl -fsS --max-time 5 "${headers[@]}" \
+  if (( sglang_healthy == 1 )) && curl -fsS --max-time 5 "${headers[@]}" \
     "http://127.0.0.1:${api_port}/healthz" 2>/dev/null \
     | python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") is True else 1)' \
       >/dev/null 2>&1; then
