@@ -316,8 +316,10 @@ def task_payload(job: dict[str, Any]) -> dict[str, Any]:
     if upstream_request.get("seed") is not None:
         task["seed"] = int(upstream_request["seed"])
     if status == "succeeded":
+        storage_url = (deployment.get("_storage") or {}).get("url")
         task["content"] = {
-            "url": f"{PUBLIC_BASE_URL}/ic/capcut/edit_gateway/v2/video_generation/{job['id']}/content"
+            "url": storage_url
+            or f"{PUBLIC_BASE_URL}/ic/capcut/edit_gateway/v2/video_generation/{job['id']}/content"
         }
     elif status == "failed":
         raw_error = job.get("error") or {}

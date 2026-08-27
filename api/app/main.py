@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import secrets
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -15,16 +17,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+from . import storage
+
 SGLANG_URL = os.getenv("SGLANG_URL", "http://127.0.0.1:30020").rstrip("/")
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data")).resolve()
 JOB_ROOT = DATA_ROOT / "jobs"
+UPLOAD_TMP_ROOT = DATA_ROOT / "tos-upload-tmp"
 API_KEY = os.getenv("API_KEY", "")
 MODEL_NAME = os.getenv("BUSINESS_MODEL", "MiniMax-H3")
 GPU_GROUP_INDEX = int(os.getenv("GPU_GROUP_INDEX", "0"))
 GPU_INDEXES = tuple(
-    int(item)
-    for item in os.getenv("GPU_INDEXES", "0,1,2,3,4,5,6,7").split(",")
-    if item
+    int(item) for item in os.getenv("GPU_INDEXES", "0,1,2,3,4,5,6,7").split(",") if item
 )
 GPU_UUIDS = tuple(item for item in os.getenv("GPU_UUIDS", "").split(",") if item)
 RELEASE_ID = os.getenv("RELEASE_ID", "unknown")
@@ -70,6 +73,7 @@ JOB_STATUS_RANK = {
     "deleted": 3,
     "cancelled": 3,
 }
+UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def validate_task_id(task_id: str) -> str:
@@ -265,8 +269,71 @@ async def retrieve_upstream(task_id: str) -> dict[str, Any]:
             task_id, payload.get("status"), metadata=metadata
         )
         payload["status"] = status
+        if status in {"completed", "succeeded"} and storage.describe()["enabled"]:
+            metadata = await ensure_tos_output(task_id, metadata)
         payload["_deployment"] = metadata
+        published_url = (metadata.get("_storage") or {}).get("url")
+        if published_url:
+            payload["output_url"] = published_url
     return payload
+
+
+async def download_upstream_content(task_id: str, destination: Path) -> None:
+    try:
+        async with (
+            httpx.AsyncClient(timeout=None) as client,
+            client.stream(
+                "GET", f"{SGLANG_URL}/v1/videos/{task_id}/content"
+            ) as response,
+        ):
+            if not response.is_success:
+                await response.aread()
+                raise_upstream(response)
+            with destination.open("wb") as output:
+                async for chunk in response.aiter_bytes(4 * 1024 * 1024):
+                    output.write(chunk)
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, OSError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"could not stage generated video for TOS: {type(exc).__name__}",
+        ) from exc
+
+
+async def ensure_tos_output(task_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    if (metadata.get("_storage") or {}).get("url"):
+        return metadata
+
+    lock = UPLOAD_LOCKS.setdefault(task_id, asyncio.Lock())
+    async with lock:
+        latest = load_metadata(task_id) or metadata
+        if (latest.get("_storage") or {}).get("url"):
+            return latest
+
+        UPLOAD_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{task_id}.", suffix=".mp4", dir=UPLOAD_TMP_ROOT
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            await download_upstream_content(task_id, temporary)
+            try:
+                published = await asyncio.to_thread(
+                    storage.publish_file, temporary, task_id
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"TOS upload failed: {type(exc).__name__}",
+                ) from exc
+            published["uploaded_at"] = int(time.time())
+            latest["_storage"] = published
+            save_metadata(task_id, latest)
+            return latest
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 async def delete_upstream(task_id: str) -> dict[str, Any]:
@@ -426,6 +493,7 @@ async def healthz(_: None = Depends(require_api_key)) -> dict[str, Any]:
             "lora_merge_mode": LORA_MERGE_MODE,
             "cache_dit_enabled": CACHE_DIT_ENABLED,
             "cache_dit_config": CACHE_DIT_CONFIG if CACHE_DIT_ENABLED else None,
+            "output_storage": storage.describe(),
         },
     }
 
