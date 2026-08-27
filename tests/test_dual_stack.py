@@ -39,11 +39,21 @@ def test_create_listeners_uses_loopback_behind_http_mesh():
 
 
 def test_resolve_port_prefers_mesh_ingress_port(monkeypatch):
+    monkeypatch.delenv("PORT0", raising=False)
     monkeypatch.setenv("MESH_INGRESS_PORT", "11288")
     monkeypatch.setenv("PORT", "30010")
 
     assert MODULE.resolve_port(mesh_ingress=True) == 11288
     assert MODULE.resolve_port(mesh_ingress=False) == 30010
+
+
+def test_resolve_port_prefers_platform_port0(monkeypatch):
+    monkeypatch.setenv("PORT0", "10111")
+    monkeypatch.setenv("MESH_INGRESS_PORT", "11288")
+    monkeypatch.setenv("PORT", "30010")
+
+    assert MODULE.resolve_port(mesh_ingress=True) == 10111
+    assert MODULE.resolve_port(mesh_ingress=False) == 10111
 
 
 def test_http_mesh_ingress_enabled_accepts_platform_boolean(monkeypatch):
@@ -55,6 +65,8 @@ def test_http_mesh_ingress_enabled_accepts_platform_boolean(monkeypatch):
 def test_configure_public_base_url_prefers_the_global_ipv6(monkeypatch):
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("PUBLIC_ADVERTISE_IP", raising=False)
+    monkeypatch.delenv("BYTED_HOST_IP", raising=False)
+    monkeypatch.delenv("BYTED_HOST_IPV6", raising=False)
     monkeypatch.setattr(
         MODULE.subprocess,
         "check_output",
@@ -67,6 +79,30 @@ def test_configure_public_base_url_prefers_the_global_ipv6(monkeypatch):
     assert MODULE.configure_public_base_url(11637) == (
         "http://[2605:340:cd52:1900:e2bf:f442:842c:d69c]:11637"
     )
+
+
+def test_configure_public_base_url_uses_byted_host_ipv6(monkeypatch):
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_ADVERTISE_IP", raising=False)
+    monkeypatch.setenv("BYTED_HOST_IP", "")
+    monkeypatch.setenv(
+        "BYTED_HOST_IPV6", "2605:340:cd52:1901:b4b2:9a04:bb74:ae3c"
+    )
+
+    assert MODULE.configure_public_base_url(10111) == (
+        "http://[2605:340:cd52:1901:b4b2:9a04:bb74:ae3c]:10111"
+    )
+
+
+def test_configure_public_base_url_prefers_byted_host_ipv4(monkeypatch):
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_ADVERTISE_IP", raising=False)
+    monkeypatch.setenv("BYTED_HOST_IP", "10.20.30.40")
+    monkeypatch.setenv(
+        "BYTED_HOST_IPV6", "2605:340:cd52:1901:b4b2:9a04:bb74:ae3c"
+    )
+
+    assert MODULE.configure_public_base_url(10111) == "http://10.20.30.40:10111"
 
 
 def test_configure_public_base_url_preserves_an_explicit_value(monkeypatch):

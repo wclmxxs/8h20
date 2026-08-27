@@ -6,7 +6,13 @@ if [[ ${BERNARD_DEBUG_HOLD:-0} == 1 ]]; then
   exit 0
 fi
 
-port=${PORT:-${TCE_SERVICE_PORT:-30010}}
+if [[ -n ${PORT0:-} ]]; then
+  port=${PORT0}
+elif [[ ${REQUIRE_HTTP_MESH:-0} =~ ^(1|true|True|yes|on)$ && -n ${MESH_INGRESS_PORT:-} ]]; then
+  port=${MESH_INGRESS_PORT}
+else
+  port=${PORT:-${TCE_SERVICE_PORT:-30010}}
+fi
 headers=()
 if [[ -n ${API_KEY:-} ]]; then
   headers=(-H "Authorization: Bearer ${API_KEY}")

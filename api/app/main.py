@@ -522,6 +522,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+@app.get("/livez")
+async def livez(_: None = Depends(require_api_key)) -> dict[str, bool]:
+    """Report API process liveness without depending on model readiness."""
+    return {"ok": True}
+
+
 @app.get("/healthz")
 async def healthz(_: None = Depends(require_api_key)) -> dict[str, Any]:
     healthy = False

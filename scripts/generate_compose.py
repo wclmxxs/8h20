@@ -121,7 +121,7 @@ def sglang_service(
                 '      COMPONENT_ATTENTION_BACKENDS: "${SOL_COMPONENT_ATTENTION_BACKENDS:-text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn}"',
                 '      ATTENTION_BACKEND_CONFIG: "${SOL_ATTENTION_BACKEND_CONFIG:-dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5}"',
                 '      SOL_ATTN_STRICT: "${SOL_ATTN_STRICT:-1}"',
-                '      WARMUP_STEPS: "${SOL_WARMUP_STEPS:-3}"',
+                '      WARMUP_STEPS: "${SOL_WARMUP_STEPS:-0}"',
                 '      QUANTIZATION: "${SOL_QUANTIZATION:-fp8}"',
                 '      ENABLE_TORCH_COMPILE: "${SOL_ENABLE_TORCH_COMPILE:-0}"',
                 '      LORA_MERGE_MODE: "${SOL_LORA_MERGE_MODE:-dynamic}"',

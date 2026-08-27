@@ -19,6 +19,9 @@ def http_mesh_ingress_enabled() -> bool:
 
 
 def resolve_port(mesh_ingress: bool) -> int:
+    platform_port = os.getenv("PORT0", "").strip()
+    if platform_port:
+        return int(platform_port)
     if mesh_ingress:
         mesh_port = os.getenv("MESH_INGRESS_PORT", "").strip()
         if mesh_port:
@@ -66,6 +69,13 @@ def discover_advertise_ip() -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     if explicit:
         return ipaddress.ip_address(explicit)
 
+    # Bernard exposes the application through PORT0 on the pod address. Prefer
+    # the platform-provided IPv4 address when present and fall back to IPv6.
+    for name in ("BYTED_HOST_IP", "BYTED_HOST_IPV6"):
+        platform_address = os.getenv(name, "").strip().strip("[]")
+        if platform_address:
+            return ipaddress.ip_address(platform_address)
+
     output = subprocess.check_output(
         ["hostname", "-I"], text=True, timeout=5
     ).split()
@@ -107,7 +117,11 @@ def configure_public_base_url(port: int) -> str:
 
 
 def main() -> None:
-    mesh_ingress = http_mesh_ingress_enabled()
+    # PORT0 means the Bernard gateway reaches the pod address directly. In
+    # that mode keep both wildcard listeners even if a generic mesh flag was
+    # inherited from the environment.
+    direct_gateway = bool(os.getenv("PORT0", "").strip())
+    mesh_ingress = http_mesh_ingress_enabled() and not direct_gateway
     port = resolve_port(mesh_ingress)
     public_base_url = configure_public_base_url(port)
     listeners = create_listeners(port, mesh_ingress=mesh_ingress)

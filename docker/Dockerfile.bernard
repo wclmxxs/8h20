@@ -101,7 +101,7 @@ ENV OPTIMIZATION_STACK_ENABLED=1 \
     COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn \
     ATTENTION_BACKEND_CONFIG=dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5 \
     SOL_ATTN_STRICT=1 \
-    WARMUP_STEPS=3 \
+    WARMUP_STEPS=0 \
     QUANTIZATION=fp8 \
     ENABLE_TORCH_COMPILE=0 \
     LORA_LOCAL_PATH=/cache/huggingface/hub/models--larryvrh--MiniMax-H3-Turbo-Lora/snapshots/43a74557ac3f6539db8e0f2a959d03feb7a81480 \

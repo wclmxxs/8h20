@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_PORT=${PORT:-${TCE_SERVICE_PORT:-30010}}
+API_PORT=${PORT0:-${PORT:-${TCE_SERVICE_PORT:-30010}}}
 SGLANG_PORT=${SGLANG_PORT:-30020}
 STARTUP_TIMEOUT_SECONDS=${STARTUP_TIMEOUT_SECONDS:-1800}
 DATA_ROOT=${DATA_ROOT:-/opt/tiger/minimax-h3/data}
@@ -165,10 +165,19 @@ trap shutdown EXIT INT TERM
 /opt/minimax-h3/bin/launch_sglang.sh &
 sglang_pid=$!
 
+# Expose the API while SGLang initializes so liveness remains observable. Its
+# /healthz endpoint continues to report not-ready until SGLang /health passes.
+/opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/api/run_dual_stack.py &
+api_pid=$!
+
 deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   if ! kill -0 "${sglang_pid}" 2>/dev/null; then
     wait "${sglang_pid}"
+    exit $?
+  fi
+  if ! kill -0 "${api_pid}" 2>/dev/null; then
+    wait "${api_pid}"
     exit $?
   fi
   if curl -fsS "http://127.0.0.1:${SGLANG_PORT}/health" >/dev/null; then
@@ -180,9 +189,6 @@ if ! curl -fsS "http://127.0.0.1:${SGLANG_PORT}/health" >/dev/null; then
   echo "SGLang did not become healthy within ${STARTUP_TIMEOUT_SECONDS}s" >&2
   exit 1
 fi
-
-/opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/api/run_dual_stack.py &
-api_pid=$!
 
 echo "READY: Bernard API dual-stack port=${API_PORT}; SGLang port=${SGLANG_PORT}; topology=TP1xUlysses8 on 8xH20"
 wait -n "${sglang_pid}" "${api_pid}"

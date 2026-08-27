@@ -283,7 +283,7 @@ Content-Type: application/json
 | `SOL_COMPONENT_ATTENTION_BACKENDS` | `text_encoder=torch_sdpa,audio_vae=fa,video_vae=fa,transformer=sol_attn` | H3 DiT 使用 Sol；install 会自动补齐并强制保护文本编码器及 Audio/Video VAE，避免旧 `.env` 或自定义值误用 Sol |
 | `SOL_ATTENTION_BACKEND_CONFIG` | `dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5` | Sol 激进稀疏配置；6 NFE 的全部 step 均进入稀疏路径 |
 | `SOL_ATTN_STRICT` | `1` | 禁止 Sol kernel 异常时静默回退为 dense，避免产生虚假测速结果 |
-| `SOL_WARMUP_STEPS` | `3` | 启动时执行 3 个 warmup step，覆盖 dense 和 sparse 两种 kernel 路径 |
+| `SOL_WARMUP_STEPS` | `0` | 正式 Bernard 发布默认跳过 synthetic warmup，避免超出候选实例 Ready 截止时间；部署后可用真实请求预热 |
 | `SOL_QUANTIZATION` | `fp8` | 在线量化基模 transformer，LoRA 不合入量化权重 |
 | `SOL_ENABLE_TORCH_COMPILE` | `0` | H20 稳态实测更快且更稳定；保留显式开启复测能力 |
 | `SOL_LORA_MERGE_MODE` | `dynamic` | 保留 Turbo LoRA 为独立动态残差，避免静态合并后重新量化造成的画面发糊 |

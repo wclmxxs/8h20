@@ -67,6 +67,8 @@ def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
     assert "prepare_model" in entrypoint
     assert "/opt/minimax-h3/bin/launch_sglang.sh" in entrypoint
     assert "/opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/api/run_dual_stack.py" in entrypoint
+    assert 'API_PORT=${PORT0:-${PORT:-${TCE_SERVICE_PORT:-30010}}}' in entrypoint
+    assert entrypoint.index("run_dual_stack.py &") < entrypoint.index("deadline=$((SECONDS")
     assert "/opt/minimax-h3/api-venv/bin/uvicorn app.server:app" not in entrypoint
     assert "wait -n" in entrypoint
 
@@ -81,6 +83,8 @@ def test_bernard_debug_hold_keeps_pid1_alive_and_healthcheck_green():
     assert entrypoint.index("prepare_model") < entrypoint.index("debug_hold.py")
     assert "exec python3 /opt/minimax-h3/bin/debug_hold.py" in entrypoint
     assert '"mode":"debug_hold"' in healthcheck
+    assert "PORT0" in healthcheck
+    assert '"http://127.0.0.1:${port}/healthz"' in healthcheck
     assert "os.waitpid(-1, os.WNOHANG)" in holder
     assert "signal.SIGTERM" in holder
 
@@ -109,8 +113,11 @@ def test_bernard_api_runner_supports_direct_dual_stack_and_mesh_ingress():
     assert 'ipv4_host = "127.0.0.1" if mesh_ingress else "0.0.0.0"' in runner
     assert "REQUIRE_HTTP_MESH" in runner
     assert "MESH_INGRESS_PORT" in runner
+    assert 'os.getenv("PORT0"' in runner
     assert 'ipv6.bind(("::", actual_port))' in runner
     assert "PUBLIC_ADVERTISE_IP" in runner
+    assert "BYTED_HOST_IP" in runner
+    assert "BYTED_HOST_IPV6" in runner
     assert 'f"http://{host}:{port}"' in runner
 
 

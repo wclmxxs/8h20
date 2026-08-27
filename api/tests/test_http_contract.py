@@ -46,3 +46,10 @@ def test_health_endpoint_requires_configured_api_key(monkeypatch):
     response = TestClient(main.app).get("/healthz")
     assert response.status_code == 401
     assert response.json() == {"detail": "invalid API key"}
+
+
+def test_liveness_endpoint_does_not_depend_on_sglang():
+    response = TestClient(main.app).get("/livez")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}

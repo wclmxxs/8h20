@@ -175,7 +175,7 @@ def test_optimization_stack_applies_to_the_eight_gpu_worker(monkeypatch, tmp_pat
         assert "tau=1.5" in env["ATTENTION_BACKEND_CONFIG"]
         assert env["ATTENTION_BACKEND"] == "sol_attn"
         assert env["SOL_ATTN_STRICT"] == "${SOL_ATTN_STRICT:-1}"
-        assert env["WARMUP_STEPS"] == "${SOL_WARMUP_STEPS:-3}"
+        assert env["WARMUP_STEPS"] == "${SOL_WARMUP_STEPS:-0}"
         assert env["QUANTIZATION"] == "${SOL_QUANTIZATION:-fp8}"
         assert env["ENABLE_TORCH_COMPILE"] == "${SOL_ENABLE_TORCH_COMPILE:-0}"
         assert env["LORA_MERGE_MODE"] == "${SOL_LORA_MERGE_MODE:-dynamic}"
