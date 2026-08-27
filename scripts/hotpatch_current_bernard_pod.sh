@@ -227,10 +227,12 @@ status_services() {
     headers=(-H "Authorization: Bearer ${API_KEY}")
   fi
   if curl -fsS --max-time 5 "${headers[@]}" \
-    "http://127.0.0.1:${api_port}/healthz" >/dev/null 2>&1; then
+    "http://127.0.0.1:${api_port}/healthz" 2>/dev/null \
+    | python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") is True else 1)' \
+      >/dev/null 2>&1; then
     echo "API: healthy"
   else
-    echo "API: starting or failed (see ${api_log})"
+    echo "API: waiting for SGLang or failed (see ${api_log})"
     failed=1
   fi
   return "${failed}"

@@ -78,6 +78,8 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "eager_on_graph(True)" in script
     assert "debug_hold.py" in script
     assert "process_is_live" in script
+    assert "json.load(sys.stdin).get(\"ok\") is True" in script
+    assert "API: waiting for SGLang or failed" in script
     assert "MODEL=${model_root}" in script
     assert "${repo_root}/scripts/launch_sglang.sh" in script
     assert '"${repo_root}/api/run_dual_stack.py"' in script
