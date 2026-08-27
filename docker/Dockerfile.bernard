@@ -64,6 +64,8 @@ COPY api/run_dual_stack.py /opt/minimax-h3/api/run_dual_stack.py
 COPY scripts/download_lora.py /opt/minimax-h3/bin/download_lora.py
 COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh
 COPY scripts/start_bernard.sh /opt/minimax-h3/bin/start_bernard.sh
+COPY scripts/debug_hold.py /opt/minimax-h3/bin/debug_hold.py
+COPY scripts/hotpatch_current_bernard_pod.sh /opt/minimax-h3/bin/hotpatch_current_bernard_pod.sh
 COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh
 RUN /opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/bin/download_lora.py \
       --cache-root /cache/huggingface \
@@ -76,11 +78,14 @@ RUN /opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/bin/download_lora.py \
 RUN chmod 0755 \
       /opt/minimax-h3/api/run_dual_stack.py \
       /opt/minimax-h3/bin/download_lora.py \
+      /opt/minimax-h3/bin/debug_hold.py \
+      /opt/minimax-h3/bin/hotpatch_current_bernard_pod.sh \
       /opt/minimax-h3/bin/launch_sglang.sh \
       /opt/minimax-h3/bin/start_bernard.sh \
       /opt/tiger/csde/healthcheck.sh
 
 ENV OPTIMIZATION_STACK_ENABLED=1 \
+    BERNARD_DEBUG_HOLD=0 \
     NUM_GPUS=8 \
     TP=1 \
     ULYSSES=8 \

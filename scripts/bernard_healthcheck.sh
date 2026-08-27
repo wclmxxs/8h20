@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ ${BERNARD_DEBUG_HOLD:-0} == 1 ]]; then
+  printf '{"ok":true,"mode":"debug_hold"}\n'
+  exit 0
+fi
+
 port=${PORT:-${TCE_SERVICE_PORT:-30010}}
 headers=()
 if [[ -n ${API_KEY:-} ]]; then

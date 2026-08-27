@@ -37,6 +37,8 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
     assert "COPY api/app /opt/minimax-h3/api/app" in dockerfile
     assert "COPY api/run_dual_stack.py /opt/minimax-h3/api/run_dual_stack.py" in dockerfile
     assert "COPY scripts/bernard_healthcheck.sh /opt/tiger/csde/healthcheck.sh" in dockerfile
+    assert "COPY scripts/debug_hold.py /opt/minimax-h3/bin/debug_hold.py" in dockerfile
+    assert "BERNARD_DEBUG_HOLD=0" in dockerfile
 
 
 def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
@@ -60,6 +62,20 @@ def test_bernard_entrypoint_fails_closed_to_one_eight_h20_worker():
     assert "/opt/minimax-h3/api-venv/bin/python /opt/minimax-h3/api/run_dual_stack.py" in entrypoint
     assert "/opt/minimax-h3/api-venv/bin/uvicorn app.server:app" not in entrypoint
     assert "wait -n" in entrypoint
+
+
+def test_bernard_debug_hold_keeps_pid1_alive_and_healthcheck_green():
+    entrypoint = (ROOT / "scripts/start_bernard.sh").read_text()
+    healthcheck = (ROOT / "scripts/bernard_healthcheck.sh").read_text()
+    holder = (ROOT / "scripts/debug_hold.py").read_text()
+
+    assert "BERNARD_DEBUG_HOLD must be 0 or 1" in entrypoint
+    assert "prepare_model" in entrypoint
+    assert entrypoint.index("prepare_model") < entrypoint.index("debug_hold.py")
+    assert "exec python3 /opt/minimax-h3/bin/debug_hold.py" in entrypoint
+    assert '"mode":"debug_hold"' in healthcheck
+    assert "os.waitpid(-1, os.WNOHANG)" in holder
+    assert "signal.SIGTERM" in holder
 
 
 def test_bernard_image_verifies_the_api_module_entrypoint():

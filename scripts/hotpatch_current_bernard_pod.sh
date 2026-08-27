@@ -1,60 +1,126 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Hot-patch the already running Bernard container for short-lived validation.
-# This intentionally avoids an image build and reuses the localized model. PID 1
-# is left stopped after the old children are replaced because its original
-# `wait -n` would otherwise observe an exited child and terminate the container.
+# Manage manually launched SGLang/API processes in a BERNARD_DEBUG_HOLD=1 Pod.
+# The permanent PID 1 is debug_hold.py, so restarting these children never
+# terminates the container or triggers another model download.
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 runtime_root=/sgl-workspace/sglang
 model_root=${CSDE_MODEL_ROOT:-/opt/tiger/csde/MiniMax-H3}
 sglang_port=${SGLANG_PORT:-30020}
 api_port=${PORT:-${TCE_SERVICE_PORT:-30010}}
-startup_timeout=${HOTPATCH_STARTUP_TIMEOUT_SECONDS:-1800}
-sglang_log=/tmp/minimax-h3-hotpatch-sglang.log
-api_log=/tmp/minimax-h3-hotpatch-api.log
+sglang_log=/tmp/minimax-h3-debug-sglang.log
+api_log=/tmp/minimax-h3-debug-api.log
+pid_file=/tmp/minimax-h3-debug-services.pids
+action=${1:-restart}
 
 die() {
   echo "ERROR: $*" >&2
   exit 1
 }
 
+case ${action} in
+  start|stop|restart|status) ;;
+  *) die "usage: $0 [start|stop|restart|status]" ;;
+esac
 if (( EUID != 0 )); then
   die "run this script as root inside the Bernard Pod"
 fi
-[[ -d ${runtime_root} ]] || die "missing SGLang workspace: ${runtime_root}"
-[[ -f ${model_root}/modular_model_index.json ]] \
-  || die "localized MiniMax-H3 model is missing: ${model_root}"
-[[ -x /opt/minimax-h3/bin/launch_sglang.sh ]] \
-  || die "missing SGLang launcher in the current image"
-[[ -x /opt/minimax-h3/api-venv/bin/python ]] \
-  || die "missing Bernard API virtualenv in the current image"
 
 pid1_command=$(tr '\0' ' ' </proc/1/cmdline)
-[[ ${pid1_command} == *start_bernard.sh* ]] \
-  || die "PID 1 is not the Bernard supervisor: ${pid1_command}"
+[[ ${pid1_command} == *debug_hold.py* ]] || die \
+  "this command requires a BERNARD_DEBUG_HOLD=1 image; PID 1 is: ${pid1_command}"
 
-cd "${runtime_root}"
-runtime_source=$(
-  python3 - <<'PY'
+process_is_live() {
+  local pid=$1
+  local stat rest state
+  [[ -r /proc/${pid}/stat ]] || return 1
+  stat=$(</proc/${pid}/stat)
+  rest=${stat#*) }
+  state=${rest%% *}
+  [[ ${state} != Z && ${state} != X ]]
+}
+
+find_service_roots() {
+  local pid command
+  while read -r pid command; do
+    if [[ ${command} == *"/usr/local/bin/sglang serve"* ]] \
+      || [[ ${command} == *"/run_dual_stack.py"* ]]; then
+      process_is_live "${pid}" && printf '%s\n' "${pid}"
+    fi
+  done < <(ps -eo pid=,args=)
+}
+
+collect_descendants() {
+  local parent=$1
+  local child
+  while read -r child; do
+    [[ -n ${child} ]] || continue
+    collect_descendants "${child}"
+  done < <(pgrep -P "${parent}" || true)
+  printf '%s\n' "${parent}"
+}
+
+stop_services() {
+  local root_pid child_pid pid
+  local -a roots=()
+  local -a service_pids=()
+  local -a survivors=()
+
+  mapfile -t roots < <(find_service_roots | sort -nu)
+  if (( ${#roots[@]} == 0 )); then
+    echo "No live debug SGLang/API processes found."
+    return
+  fi
+  for root_pid in "${roots[@]}"; do
+    while read -r child_pid; do
+      [[ -n ${child_pid} ]] && service_pids+=("${child_pid}")
+    done < <(collect_descendants "${root_pid}")
+  done
+  mapfile -t service_pids < <(printf '%s\n' "${service_pids[@]}" | sort -nu)
+
+  echo "Stopping debug service PIDs: ${service_pids[*]}"
+  kill -TERM "${service_pids[@]}" 2>/dev/null || true
+  deadline=$((SECONDS + 30))
+  while (( SECONDS < deadline )); do
+    survivors=()
+    for pid in "${service_pids[@]}"; do
+      process_is_live "${pid}" && survivors+=("${pid}")
+    done
+    (( ${#survivors[@]} == 0 )) && break
+    sleep 1
+  done
+  if (( ${#survivors[@]} > 0 )); then
+    echo "Force-stopping remaining PIDs: ${survivors[*]}"
+    kill -KILL "${survivors[@]}" 2>/dev/null || true
+  fi
+}
+
+apply_runtime_patch() {
+  local runtime_source backup
+
+  [[ -d ${runtime_root} ]] || die "missing SGLang workspace: ${runtime_root}"
+  cd "${runtime_root}"
+  runtime_source=$(
+    python3 - <<'PY'
 import inspect
 import sglang.multimodal_gen.runtime.models.dits.minimax_h3 as module
 
 print(inspect.getsourcefile(module))
 PY
-)
-[[ -f ${runtime_source} ]] || die "cannot locate the imported MiniMax H3 source"
-case ${runtime_source} in
-  "${runtime_root}"/* | /usr/local/lib/python*/dist-packages/sglang/*) ;;
-  *) die "refusing to patch unexpected runtime source: ${runtime_source}" ;;
-esac
+  )
+  [[ -f ${runtime_source} ]] || die "cannot locate imported MiniMax H3 source"
+  case ${runtime_source} in
+    "${runtime_root}"/* | /usr/local/lib/python*/dist-packages/sglang/*) ;;
+    *) die "refusing to patch unexpected runtime source: ${runtime_source}" ;;
+  esac
 
-backup=${runtime_source}.before-final-gather-bcg
-if [[ ! -e ${backup} ]]; then
-  cp -p -- "${runtime_source}" "${backup}"
-fi
-python3 - "${runtime_source}" <<'PY'
+  backup=${runtime_source}.before-final-gather-bcg
+  if [[ ! -e ${backup} ]]; then
+    cp -p -- "${runtime_source}" "${backup}"
+  fi
+  python3 - "${runtime_source}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -72,150 +138,118 @@ _minimax_h3_sp_all_gather_eager = eager_on_graph(True)(
 """
 source = path.read_text()
 if new in source:
-    print(f"Patch already present: {path}")
+    print(f"Runtime patch already present: {path}")
 elif old in source:
     path.write_text(source.replace(old, new, 1))
     print(f"Patched runtime source: {path}")
 else:
-    raise SystemExit(
-        "Runtime source is neither the expected v1.0.0.13 code nor the patched code: "
-        f"{path}"
-    )
+    raise SystemExit(f"Unexpected MiniMax H3 runtime source: {path}")
 PY
-python3 -m py_compile "${runtime_source}"
-
-if [[ ${1:-} == --patch-only ]]; then
-  echo "Patch-only mode complete; processes were not restarted."
-  exit 0
-fi
-if [[ $# -gt 0 ]]; then
-  die "unknown argument: $1 (the only supported argument is --patch-only)"
-fi
-
-service_roots=()
-found_sglang=0
-found_api=0
-while read -r pid ppid command; do
-  if [[ ${ppid} == 1 && ${command} == *"/usr/local/bin/sglang serve"* ]]; then
-    service_roots+=("${pid}")
-    found_sglang=1
-  elif [[ ${ppid} == 1 && ${command} == *"/opt/minimax-h3/api/run_dual_stack.py"* ]]; then
-    service_roots+=("${pid}")
-    found_api=1
-  fi
-done < <(ps -eo pid=,ppid=,args=)
-(( found_sglang == 1 )) || die "could not find the current SGLang child of PID 1"
-(( found_api == 1 )) || die "could not find the current API child of PID 1"
-
-collect_descendants() {
-  local parent=$1
-  local child
-  while read -r child; do
-    [[ -n ${child} ]] || continue
-    collect_descendants "${child}"
-  done < <(pgrep -P "${parent}" || true)
-  printf '%s\n' "${parent}"
+  python3 -m py_compile "${runtime_source}"
 }
 
-service_pids=()
-for root_pid in "${service_roots[@]}"; do
-  while read -r child_pid; do
-    [[ -n ${child_pid} ]] && service_pids+=("${child_pid}")
-  done < <(collect_descendants "${root_pid}")
-done
-mapfile -t service_pids < <(printf '%s\n' "${service_pids[@]}" | sort -nu)
+export_runtime() {
+  local data_base=${MINIMAX_H3_DATA_BASE:-/opt/tiger/minimax-h3/data}
 
-echo "Pausing Bernard PID 1 and replacing only its SGLang/API children."
-kill -STOP 1
-kill -TERM "${service_pids[@]}" 2>/dev/null || true
+  [[ -f ${model_root}/modular_model_index.json ]] \
+    || die "localized MiniMax-H3 model is missing: ${model_root}"
+  export NUM_GPUS=8
+  export TP=1
+  export ULYSSES=8
+  export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
+  export MODEL=${model_root}
+  export SGLANG_HOST=127.0.0.1
+  export SGLANG_PORT=${sglang_port}
+  export SGLANG_URL=http://127.0.0.1:${sglang_port}
+  export OUTPUT_PATH=${data_base}/videos
+  export DATA_ROOT=${data_base}/api
+  export GPU_GROUP_INDEX=0
+  export GPU_INDEXES=0,1,2,3,4,5,6,7
+  export RELEASE_ID=${RELEASE_ID:-h3-8h20-debug}
+  export PORT=${api_port}
+  export PYTHONPATH=${repo_root}/api${PYTHONPATH:+:${PYTHONPATH}}
+  mkdir -p "${OUTPUT_PATH}" "${DATA_ROOT}"
+}
 
-deadline=$((SECONDS + 120))
-while (( SECONDS < deadline )); do
-  survivors=()
-  for pid in "${service_pids[@]}"; do
-    kill -0 "${pid}" 2>/dev/null && survivors+=("${pid}")
-  done
-  (( ${#survivors[@]} == 0 )) && break
-  sleep 1
-done
-if (( ${#survivors[@]} > 0 )); then
-  echo "Force-stopping stale worker PIDs: ${survivors[*]}"
-  kill -KILL "${survivors[@]}" 2>/dev/null || true
-fi
+start_services() {
+  local -a existing=()
+  mapfile -t existing < <(find_service_roots | sort -nu)
+  (( ${#existing[@]} == 0 )) \
+    || die "debug services are already running (${existing[*]}); use restart"
+  [[ -x ${repo_root}/scripts/launch_sglang.sh ]] \
+    || die "missing launcher: ${repo_root}/scripts/launch_sglang.sh"
+  [[ -f ${repo_root}/api/run_dual_stack.py ]] \
+    || die "missing API runner: ${repo_root}/api/run_dual_stack.py"
+  [[ -x /opt/minimax-h3/api-venv/bin/python ]] \
+    || die "missing Bernard API virtualenv"
 
-data_base=${MINIMAX_H3_DATA_BASE:-/opt/tiger/minimax-h3/data}
-export NUM_GPUS=8
-export TP=1
-export ULYSSES=8
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
-export MODEL=${model_root}
-export SGLANG_HOST=127.0.0.1
-export SGLANG_PORT=${sglang_port}
-export SGLANG_URL=http://127.0.0.1:${sglang_port}
-export OUTPUT_PATH=${data_base}/videos
-export DATA_ROOT=${data_base}/api
-export GPU_GROUP_INDEX=0
-export GPU_INDEXES=0,1,2,3,4,5,6,7
-export RELEASE_ID=${RELEASE_ID:-h3-8h20-hotpatch}
-export PORT=${api_port}
-export PYTHONPATH=/opt/minimax-h3/api${PYTHONPATH:+:${PYTHONPATH}}
-mkdir -p "${OUTPUT_PATH}" "${DATA_ROOT}"
+  export_runtime
+  : >"${sglang_log}"
+  nohup setsid "${repo_root}/scripts/launch_sglang.sh" \
+    >"${sglang_log}" 2>&1 </dev/null &
+  sglang_pid=$!
 
-: >"${sglang_log}"
-nohup setsid /opt/minimax-h3/bin/launch_sglang.sh \
-  >"${sglang_log}" 2>&1 </dev/null &
-new_sglang_pid=$!
-echo "Started SGLang PID ${new_sglang_pid}; log: ${sglang_log}"
+  : >"${api_log}"
+  nohup setsid /opt/minimax-h3/api-venv/bin/python \
+    "${repo_root}/api/run_dual_stack.py" >"${api_log}" 2>&1 </dev/null &
+  api_pid=$!
+  sleep 3
+  process_is_live "${sglang_pid}" || {
+    tail -n 80 "${sglang_log}" >&2 || true
+    die "SGLang exited immediately"
+  }
+  process_is_live "${api_pid}" || {
+    tail -n 80 "${api_log}" >&2 || true
+    die "API exited immediately"
+  }
+  printf 'SGLANG_PID=%s\nAPI_PID=%s\n' "${sglang_pid}" "${api_pid}" >"${pid_file}"
+  echo "STARTED: SGLang PID ${sglang_pid}; API PID ${api_pid}"
+  echo "SGLang warmup continues in the background: ${sglang_log}"
+  echo "API log: ${api_log}"
+  echo "Run '$0 status' until both endpoints report healthy."
+}
 
-deadline=$((SECONDS + startup_timeout))
-next_update=$((SECONDS + 30))
-while ! curl -fsS --max-time 5 "http://127.0.0.1:${sglang_port}/health" \
-  >/dev/null 2>&1; do
-  if ! kill -0 "${new_sglang_pid}" 2>/dev/null; then
-    tail -n 120 "${sglang_log}" >&2 || true
-    die "hot-patched SGLang exited during startup; restart the Pod to restore supervision"
+status_services() {
+  local failed=0
+  local -a roots=()
+  local -a headers=()
+
+  mapfile -t roots < <(find_service_roots | sort -nu)
+  echo "Live service root PIDs: ${roots[*]:-none}"
+  if curl -fsS --max-time 5 "http://127.0.0.1:${sglang_port}/health" \
+    >/dev/null 2>&1; then
+    echo "SGLang: healthy"
+  else
+    echo "SGLang: starting or failed (see ${sglang_log})"
+    failed=1
   fi
-  if (( SECONDS >= deadline )); then
-    tail -n 120 "${sglang_log}" >&2 || true
-    die "SGLang did not become healthy within ${startup_timeout}s"
+  if [[ -n ${API_KEY:-} ]]; then
+    headers=(-H "Authorization: Bearer ${API_KEY}")
   fi
-  if (( SECONDS >= next_update )); then
-    echo "Still waiting for SGLang warmup ($((deadline - SECONDS))s remaining)..."
-    next_update=$((SECONDS + 30))
+  if curl -fsS --max-time 5 "${headers[@]}" \
+    "http://127.0.0.1:${api_port}/healthz" >/dev/null 2>&1; then
+    echo "API: healthy"
+  else
+    echo "API: starting or failed (see ${api_log})"
+    failed=1
   fi
-  sleep 5
-done
+  return "${failed}"
+}
 
-: >"${api_log}"
-nohup setsid /opt/minimax-h3/api-venv/bin/python \
-  /opt/minimax-h3/api/run_dual_stack.py >"${api_log}" 2>&1 </dev/null &
-new_api_pid=$!
-echo "Started API PID ${new_api_pid}; log: ${api_log}"
-
-headers=()
-if [[ -n ${API_KEY:-} ]]; then
-  headers=(-H "Authorization: Bearer ${API_KEY}")
-fi
-deadline=$((SECONDS + 120))
-while ! curl -fsS --max-time 5 "${headers[@]}" \
-  "http://127.0.0.1:${api_port}/healthz" >/dev/null 2>&1; do
-  if ! kill -0 "${new_api_pid}" 2>/dev/null; then
-    tail -n 120 "${api_log}" >&2 || true
-    die "hot-patched API exited during startup; restart the Pod to restore supervision"
-  fi
-  if (( SECONDS >= deadline )); then
-    tail -n 120 "${api_log}" >&2 || true
-    die "API did not become healthy within 120s"
-  fi
-  sleep 2
-done
-
-cat >/tmp/minimax-h3-hotpatch.pids <<EOF
-SGLANG_PID=${new_sglang_pid}
-API_PID=${new_api_pid}
-EOF
-
-echo "READY: hot-patched API port=${api_port}; SGLang port=${sglang_port}"
-echo "PID 1 remains stopped by design. Do not run 'kill -CONT 1'."
-echo "After validation, restart the Pod (or deploy a fixed image) to restore supervision."
-echo "Repository used for the hot-patch: ${repo_root}"
+case ${action} in
+  start)
+    apply_runtime_patch
+    start_services
+    ;;
+  stop)
+    stop_services
+    ;;
+  restart)
+    apply_runtime_patch
+    stop_services
+    start_services
+    ;;
+  status)
+    status_services
+    ;;
+esac

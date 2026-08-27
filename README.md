@@ -39,21 +39,34 @@ Bernard 镜像在构建阶段下载并按固定 revision、大小和 SHA256 校�
 
 Bernard 模式不启动自注册 Reporter、Docker-socket Watchdog 或 cleaner 容器；平台负责实例注册/健康重建，业务 API 仍把视频与任务元数据写到 `DATA_ROOT`。
 
-### 当前 Bernard Pod 内热更新（仅用于测试）
+### 常驻 Pod 调试模式
 
-短期验证 SGLang Python 改动不需要构建镜像。在 Pod WebShell 内拉取本仓库并执行：
+短期反复验证 Python 改动时，为部署设置 `BERNARD_DEBUG_HOLD=1`。镜像仍会先把模型完整下载到 `/opt/tiger/csde/MiniMax-H3`，然后 PID 1 进入常驻的 child reaper，不自动启动 SGLang/API。调试健康检查固定成功，子进程退出不会触发容器重建或再次下载模型。该模式没有业务服务时也会显示健康，因此只能用于已隔离流量的调试实例。
+
+首次进入 Pod WebShell 后，每条命令分别执行：
 
 ```bash
 cd /tmp
 git clone https://github.com/wclmxxs/8h20.git minimaxh3-8h20-hotpatch
-cd minimaxh3-8h20-hotpatch
-git pull --ff-only
-./scripts/hotpatch_current_bernard_pod.sh
+cd /tmp/minimaxh3-8h20-hotpatch
+bash scripts/hotpatch_current_bernard_pod.sh start
 ```
 
-脚本会定位当前进程实际导入的 `minimax_h3.py`、保留一份原文件、应用最终 SP `all_gather` 的 CUDA Graph eager 修复，然后只替换 SGLang 和 API 子进程。它直接复用 `/opt/tiger/csde/MiniMax-H3`，不会重新下载模型，也不会构建镜像。重启期间实例会暂时不健康；同一组 8 张 H20 无法在保留旧 SGLang GPU 进程的同时再完整启动一份 H3。
+启动命令会定位实际导入的 `minimax_h3.py`，确保最终 SP `all_gather` 的 CUDA Graph eager 修复存在，并从当前 Git checkout 启动 SGLang 和 API。它立即返回，模型加载和 `torch.compile` 预热在后台继续：
 
-这是临时测试方式：脚本会暂停原 PID 1，避免其 `wait -n` 因旧子进程退出而终止容器；不要执行 `kill -CONT 1`。测试结束后正常重启 Pod，或部署包含同一修复的正式镜像，以恢复平台进程托管。`git pull` 本身不会修改镜像里已经安装的 SGLang，因此不能省略热更新脚本。
+```bash
+bash scripts/hotpatch_current_bernard_pod.sh status
+tail -f /tmp/minimax-h3-debug-sglang.log
+```
+
+修改并推送代码后，在同一个 Pod 中复用模型和镜像：
+
+```bash
+git pull --ff-only origin main
+bash scripts/hotpatch_current_bernard_pod.sh restart
+```
+
+也可执行 `bash scripts/hotpatch_current_bernard_pod.sh stop` 释放 GPU。只有首次启用调试模式需要构建并部署一次包含该能力的镜像；之后的 Python/API/启动脚本迭代不再需要构建镜像。SGLang 的 Python 源码补丁由调试脚本直接落到当前容器；CUDA 扩展、系统依赖或基础镜像变化仍必须重新构建。
 
 ## 自管 Docker Compose（保留的备用方式）
 

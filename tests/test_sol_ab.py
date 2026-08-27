@@ -76,11 +76,13 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "inspect.getsourcefile" in script
     assert "_minimax_h3_sp_all_gather_compiler_eager" in script
     assert "eager_on_graph(True)" in script
-    assert "kill -STOP 1" in script
+    assert "debug_hold.py" in script
+    assert "process_is_live" in script
     assert "MODEL=${model_root}" in script
-    assert "/opt/minimax-h3/bin/launch_sglang.sh" in script
-    assert "/opt/minimax-h3/api/run_dual_stack.py" in script
-    assert "Do not run 'kill -CONT 1'" in script
+    assert "${repo_root}/scripts/launch_sglang.sh" in script
+    assert '"${repo_root}/api/run_dual_stack.py"' in script
+    assert "start|stop|restart|status" in script
+    assert "warmup continues in the background" in script
 
 
 def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():

@@ -7,6 +7,15 @@ STARTUP_TIMEOUT_SECONDS=${STARTUP_TIMEOUT_SECONDS:-1800}
 DATA_ROOT=${DATA_ROOT:-/opt/tiger/minimax-h3/data}
 CSDE_MODEL_ROOT=${CSDE_MODEL_ROOT:-/opt/tiger/csde/MiniMax-H3}
 HDFS_BIN=${HDFS_BIN:-/opt/tiger/hdfs_client/bin/hdfs}
+BERNARD_DEBUG_HOLD=${BERNARD_DEBUG_HOLD:-0}
+
+case ${BERNARD_DEBUG_HOLD} in
+  0|1) ;;
+  *)
+    echo "BERNARD_DEBUG_HOLD must be 0 or 1; got ${BERNARD_DEBUG_HOLD}" >&2
+    exit 1
+    ;;
+esac
 
 required_model_entries=(
   modular_model_index.json
@@ -133,6 +142,12 @@ export PYTHONPATH=/opt/minimax-h3/api${PYTHONPATH:+:${PYTHONPATH}}
 
 mkdir -p "${OUTPUT_PATH}" "${DATA_ROOT}"
 prepare_model
+
+if [[ ${BERNARD_DEBUG_HOLD} == 1 ]]; then
+  echo "DEBUG_HOLD: model is ready at ${MODEL}; SGLang/API will not auto-start"
+  echo "DEBUG_HOLD: launch them manually with hotpatch_current_bernard_pod.sh"
+  exec python3 /opt/minimax-h3/bin/debug_hold.py
+fi
 
 sglang_pid=
 api_pid=
