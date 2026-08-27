@@ -172,8 +172,8 @@ set_env_default SOL_ATTN_STRICT 1
 set_env_default SOL_WARMUP_STEPS 3
 set_env_default SOL_QUANTIZATION fp8
 set_env_default SOL_ENABLE_TORCH_COMPILE 1
-set_env_default SOL_LORA_MERGE_MODE merge
-set_env_default SOL_LORA_BEFORE_FP8 1
+set_env_default SOL_LORA_MERGE_MODE dynamic
+set_env_default SOL_LORA_BEFORE_FP8 0
 set_env_default SOL_CACHE_DIT_ENABLED true
 set_env_default SOL_CACHE_DIT_FN 1
 set_env_default SOL_CACHE_DIT_BN 0
@@ -191,7 +191,8 @@ migrate_env_default SOL_CACHE_DIT_MC 1 2
 migrate_env_default SOL_ATTENTION_BACKEND_CONFIG dense_backend=sage_attn,dense_steps=1,kv_splits=auto,tau=1.25 dense_backend=sage_attn,dense_steps=0,kv_splits=auto,tau=1.5
 migrate_env_default SOL_CACHE_DIT_RDT 0.08 0.12
 migrate_env_default SOL_CACHE_DIT_MC 2 3
-migrate_env_default SOL_LORA_MERGE_MODE dynamic merge
+migrate_env_default SOL_LORA_MERGE_MODE merge dynamic
+migrate_env_default SOL_LORA_BEFORE_FP8 1 0
 # Permit a copied 4h200 .env as an explicit migration source while replacing
 # every hardware identity and topology value with the 8h20 deployment values.
 migrate_env_default SERVICE_ID Minimax-H3-AWS-H200 Minimax-H3-Lora-H20

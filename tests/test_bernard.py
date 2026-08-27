@@ -14,20 +14,21 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
         "minimax-h3-short-edge.patch",
         "minimax-h3-request-optimization.patch",
         "minimax-h3-temporal-dense-prefix.patch",
-        "minimax-h3-static-lora-before-fp8.patch",
         "minimax-h3-compile-ulysses-eager.patch",
         "minimax-h3-cache-dit-residual-preservation.patch",
         "minimax-h3-sol-attn-path-observability.patch",
     ):
         assert patch in dockerfile
+    assert "minimax-h3-static-lora-before-fp8.patch" not in dockerfile
     assert "TORCH_CUDA_ARCH_LIST=9.0" in dockerfile
     assert "SageAttention.git@${SAGEATTENTION_REVISION}" in dockerfile
     assert "Sana.git@${SOL_ATTENTION_REVISION}" in dockerfile
     assert "COMPONENT_ATTENTION_BACKENDS=text_encoder=torch_sdpa" in dockerfile
     assert "QUANTIZATION=fp8" in dockerfile
     assert "ENABLE_TORCH_COMPILE=1" in dockerfile
-    assert "LORA_MERGE_MODE=merge" in dockerfile
-    assert "SGLANG_DIFFUSION_LORA_BEFORE_FP8=1" in dockerfile
+    assert "LORA_MERGE_MODE=dynamic" in dockerfile
+    assert "SGLANG_DIFFUSION_LORA_BEFORE_FP8=0" in dockerfile
+    assert "SGLANG_DIFFUSION_LORA_MERGE_FP32=0" in dockerfile
     assert "SGLANG_CACHE_DIT_ENABLED=true" in dockerfile
     assert 'MODEL=""' in dockerfile
     assert "CSDE_MODEL_ROOT=/opt/tiger/csde/MiniMax-H3" in dockerfile
@@ -113,8 +114,10 @@ def test_shared_launcher_keeps_the_complete_optimization_stack():
     assert 'args+=(--attention-backend "${ATTENTION_BACKEND}")' not in launcher
     assert "SOL_QUANTIZATION:-fp8" in launcher
     assert "SOL_ENABLE_TORCH_COMPILE:-1" in launcher
-    assert "SOL_LORA_MERGE_MODE:-merge" in launcher
-    assert "SOL_LORA_BEFORE_FP8:-1" in launcher
+    assert "SOL_LORA_MERGE_MODE:-dynamic" in launcher
+    assert "SOL_LORA_BEFORE_FP8:-0" in launcher
+    assert "SGLANG_DIFFUSION_LORA_MERGE_FP32=0" in launcher
+    assert "requires an FP8 base model with dynamic LoRA residuals" in launcher
     assert "--enable-torch-compile" in launcher
     assert "SOL_CACHE_DIT_ENABLED:-true" in launcher
     assert "SOL_CACHE_DIT_RDT:-0.12" in launcher

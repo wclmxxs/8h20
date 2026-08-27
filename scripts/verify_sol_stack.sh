@@ -21,7 +21,7 @@ required_env QUANTIZATION "${SOL_QUANTIZATION}"
 required_env ENABLE_TORCH_COMPILE "${SOL_ENABLE_TORCH_COMPILE}"
 required_env LORA_MERGE_MODE "${SOL_LORA_MERGE_MODE}"
 required_env SGLANG_DIFFUSION_LORA_BEFORE_FP8 "${SOL_LORA_BEFORE_FP8}"
-required_env SGLANG_DIFFUSION_LORA_MERGE_FP32 "1"
+required_env SGLANG_DIFFUSION_LORA_MERGE_FP32 "0"
 required_env SGLANG_CACHE_DIT_ENABLED "${SOL_CACHE_DIT_ENABLED}"
 required_env SGLANG_CACHE_DIT_FN "${SOL_CACHE_DIT_FN}"
 required_env SGLANG_CACHE_DIT_BN "${SOL_CACHE_DIT_BN}"
@@ -91,16 +91,12 @@ grep -Fq '"enable_torch_compile": true' <<<"${worker_logs}" || {
   echo "${container}: parsed server_args did not enable torch.compile" >&2
   exit 1
 }
-grep -Fq 'merge_mode=merge' <<<"${worker_logs}" || {
-  echo "${container}: startup LoRA was not statically merged" >&2
+grep -Fq 'merge_mode=dynamic' <<<"${worker_logs}" || {
+  echo "${container}: startup LoRA is not running as a dynamic residual" >&2
   exit 1
 }
-grep -Fq 'online FP8 layers after statically merging' <<<"${worker_logs}" || {
-  echo "${container}: FP8 was not finalized after the startup LoRA merge" >&2
-  exit 1
-}
-if grep -Fq 'Could not merge layer' <<<"${worker_logs}"; then
-  echo "${container}: at least one startup LoRA layer failed to merge" >&2
+if grep -Fq 'online FP8 layers after statically merging' <<<"${worker_logs}"; then
+  echo "${container}: forbidden static-LoRA-before-FP8 path was executed" >&2
   exit 1
 fi
 if grep -Fq 'Synthetic server warmup failed' <<<"${worker_logs}" || \
@@ -109,4 +105,4 @@ if grep -Fq 'Synthetic server warmup failed' <<<"${worker_logs}" || \
   exit 1
 fi
 
-echo "OPTIMIZATION_STACK_VERIFIED: Sol-Attn + static-LoRA-before-FP8 + torch.compile + Cache-DiT (${SOL_CACHE_DIT_WARMUP}/${SOL_CACHE_DIT_RDT}/${SOL_CACHE_DIT_MC})"
+echo "OPTIMIZATION_STACK_VERIFIED: Sol-Attn + FP8-base/dynamic-LoRA + torch.compile + Cache-DiT (${SOL_CACHE_DIT_WARMUP}/${SOL_CACHE_DIT_RDT}/${SOL_CACHE_DIT_MC})"

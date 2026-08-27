@@ -27,9 +27,6 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     temporal_patch = (
         ROOT / "patches/minimax-h3-temporal-dense-prefix.patch"
     ).read_text()
-    static_lora_patch = (
-        ROOT / "patches/minimax-h3-static-lora-before-fp8.patch"
-    ).read_text()
     compile_ulysses_patch = (
         ROOT / "patches/minimax-h3-compile-ulysses-eager.patch"
     ).read_text()
@@ -42,7 +39,7 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
 
     assert "minimax-h3-request-optimization.patch" in dockerfile
     assert "minimax-h3-temporal-dense-prefix.patch" in dockerfile
-    assert "minimax-h3-static-lora-before-fp8.patch" in dockerfile
+    assert "minimax-h3-static-lora-before-fp8.patch" not in dockerfile
     assert "minimax-h3-compile-ulysses-eager.patch" in dockerfile
     assert "minimax-h3-cache-dit-residual-preservation.patch" in dockerfile
     assert "minimax-h3-sol-attn-path-observability.patch" in dockerfile
@@ -58,10 +55,6 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert 'runtime["_force_dense"] = True' in temporal_patch
     assert 'runtime["_sink_tokens"] = dense_prefix_rows' in temporal_patch
     assert "_dense_prefix_varlen" in temporal_patch
-    assert "_finalize_deferred_fp8_after_startup_lora" in static_lora_patch
-    assert "SGLANG_DIFFUSION_LORA_BEFORE_FP8" in static_lora_patch
-    assert "process_weights_after_loading(layer)" in static_lora_patch
-    assert "startup LoRA must be fully merged before FP8" in static_lora_patch
     assert "torch.compiler.disable" in compile_ulysses_patch
     assert "_minimax_h3_attention_core_eager" in compile_ulysses_patch
     assert "_minimax_h3_sp_all_gather_compiler_eager" in compile_ulysses_patch
@@ -93,6 +86,8 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "eager_on_graph(True)" in script
     assert "minimax-h3-cache-dit-residual-preservation.patch" in script
     assert "minimax-h3-sol-attn-path-observability.patch" in script
+    assert "git apply -p1 --reverse" in script
+    assert "Removed static-LoRA-before-FP8 runtime patch" in script
     assert "git apply -p1" in script
     assert "debug_hold.py" in script
     assert "process_is_live" in script
@@ -118,6 +113,9 @@ def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():
     assert 'required_env ENABLE_TORCH_COMPILE "${SOL_ENABLE_TORCH_COMPILE}"' in script
     assert 'required_env LORA_MERGE_MODE "${SOL_LORA_MERGE_MODE}"' in script
     assert 'required_env SGLANG_DIFFUSION_LORA_BEFORE_FP8 "${SOL_LORA_BEFORE_FP8}"' in script
+    assert 'required_env SGLANG_DIFFUSION_LORA_MERGE_FP32 "0"' in script
+    assert "merge_mode=dynamic" in script
+    assert "forbidden static-LoRA-before-FP8 path was executed" in script
     assert 'required_env SGLANG_CACHE_DIT_ENABLED "${SOL_CACHE_DIT_ENABLED}"' in script
     assert 'required_env NUM_GPUS "8"' in script
     assert '"--model-type diffusion" in command' in script
@@ -150,7 +148,8 @@ def test_install_preserves_tuned_defaults_and_migrates_the_h200_identity():
     ) in script
     assert "migrate_env_default SOL_CACHE_DIT_RDT 0.08 0.12" in script
     assert "migrate_env_default SOL_CACHE_DIT_MC 2 3" in script
-    assert "migrate_env_default SOL_LORA_MERGE_MODE dynamic merge" in script
+    assert "migrate_env_default SOL_LORA_MERGE_MODE merge dynamic" in script
+    assert "migrate_env_default SOL_LORA_BEFORE_FP8 1 0" in script
     assert 'sglang_build_base_image} == "lmsysorg/sglang:dev"' in script
     assert "build_gpu_image docker/Dockerfile.sglang" in script
     assert "REBUILD_GPU_IMAGES=1 to rebuild" in script

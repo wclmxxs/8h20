@@ -98,7 +98,7 @@ stop_services() {
 }
 
 apply_runtime_patch() {
-  local runtime_source backup runtime_patch
+  local runtime_source backup runtime_patch static_lora_patch
   local -a runtime_patches=(
     "${repo_root}/patches/minimax-h3-cache-dit-residual-preservation.patch"
     "${repo_root}/patches/minimax-h3-sol-attn-path-observability.patch"
@@ -106,6 +106,16 @@ apply_runtime_patch() {
 
   [[ -d ${runtime_root} ]] || die "missing SGLang workspace: ${runtime_root}"
   cd "${runtime_root}"
+  static_lora_patch=${repo_root}/patches/minimax-h3-static-lora-before-fp8.patch
+  [[ -f ${static_lora_patch} ]] || die "missing static LoRA rollback patch: ${static_lora_patch}"
+  if git apply -p1 --reverse --check "${static_lora_patch}"; then
+    git apply -p1 --reverse "${static_lora_patch}"
+    echo "Removed static-LoRA-before-FP8 runtime patch."
+  elif git apply -p1 --check "${static_lora_patch}"; then
+    echo "Static-LoRA-before-FP8 runtime patch is already absent."
+  else
+    die "cannot prove the static-LoRA-before-FP8 patch is absent"
+  fi
   for runtime_patch in "${runtime_patches[@]}"; do
     [[ -f ${runtime_patch} ]] || die "missing runtime patch: ${runtime_patch}"
     if git apply -p1 --check "${runtime_patch}"; then

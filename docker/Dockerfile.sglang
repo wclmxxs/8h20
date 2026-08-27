@@ -8,7 +8,6 @@ COPY scripts/launch_sglang.sh /opt/minimax-h3/bin/launch_sglang.sh
 COPY patches/minimax-h3-short-edge.patch /tmp/minimax-h3-short-edge.patch
 COPY patches/minimax-h3-request-optimization.patch /tmp/minimax-h3-request-optimization.patch
 COPY patches/minimax-h3-temporal-dense-prefix.patch /tmp/minimax-h3-temporal-dense-prefix.patch
-COPY patches/minimax-h3-static-lora-before-fp8.patch /tmp/minimax-h3-static-lora-before-fp8.patch
 COPY patches/minimax-h3-compile-ulysses-eager.patch /tmp/minimax-h3-compile-ulysses-eager.patch
 COPY patches/minimax-h3-cache-dit-residual-preservation.patch /tmp/minimax-h3-cache-dit-residual-preservation.patch
 COPY patches/minimax-h3-sol-attn-path-observability.patch /tmp/minimax-h3-sol-attn-path-observability.patch
@@ -19,7 +18,6 @@ RUN cd /sgl-workspace/sglang \
          /tmp/minimax-h3-short-edge.patch \
          /tmp/minimax-h3-request-optimization.patch \
          /tmp/minimax-h3-temporal-dense-prefix.patch \
-         /tmp/minimax-h3-static-lora-before-fp8.patch \
          /tmp/minimax-h3-compile-ulysses-eager.patch \
          /tmp/minimax-h3-cache-dit-residual-preservation.patch \
          /tmp/minimax-h3-sol-attn-path-observability.patch; do \
@@ -35,7 +33,6 @@ RUN cd /sgl-workspace/sglang \
     && rm /tmp/minimax-h3-short-edge.patch \
           /tmp/minimax-h3-request-optimization.patch \
           /tmp/minimax-h3-temporal-dense-prefix.patch \
-          /tmp/minimax-h3-static-lora-before-fp8.patch \
           /tmp/minimax-h3-compile-ulysses-eager.patch \
           /tmp/minimax-h3-cache-dit-residual-preservation.patch \
           /tmp/minimax-h3-sol-attn-path-observability.patch
