@@ -5,11 +5,11 @@ def configure(monkeypatch) -> storage.TosConfig:
     values = {
         "TOS_BUCKET": "capcut-end-cloud-integration-sg",
         "TOS_ACCESS_KEY": "test-ak",
-        "TOS_SECRET_KEY": "test-sk",
         "TOS_KEY_PREFIX": "minimax_h3_data_cache/outputs",
         "TOS_PUBLIC_BASE_URL": (
             "https://tosv.byted.org/obj/capcut-end-cloud-integration-sg"
         ),
+        "TOS_IDC": "sg1",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -31,27 +31,27 @@ def test_tos_url_matches_existing_bucket_contract(monkeypatch):
     )
 
 
-def test_publish_file_uploads_video_with_content_type(tmp_path, monkeypatch):
+def test_publish_file_uses_legacy_tos_client(tmp_path, monkeypatch):
     configure(monkeypatch)
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video-data")
     calls = []
 
-    class FakeFileSystem:
-        def put_file(self, source, destination, **kwargs):
-            calls.append((source, destination, kwargs))
+    class FakeResponse:
+        status_code = 200
 
-    monkeypatch.setattr(storage, "_filesystem", lambda _: FakeFileSystem())
+    class FakeClient:
+        def put_object(self, object_key, content):
+            calls.append((object_key, content.read()))
+            return FakeResponse()
+
+    monkeypatch.setattr(storage, "_client", lambda _: FakeClient())
     published = storage.publish_file(video, "video_123")
 
     assert calls == [
         (
-            str(video),
-            (
-                "tos://capcut-end-cloud-integration-sg/"
-                "minimax_h3_data_cache/outputs/video_123.mp4"
-            ),
-            {"ContentType": "video/mp4"},
+            "minimax_h3_data_cache/outputs/video_123.mp4",
+            b"video-data",
         )
     ]
     assert published["url"].endswith("/minimax_h3_data_cache/outputs/video_123.mp4")

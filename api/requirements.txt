@@ -1,5 +1,4 @@
 fastapi>=0.115,<1
 httpx>=0.28,<1
 pydantic>=2.10,<3
-tosfsspec>=2026.6.26,<2027
 uvicorn[standard]>=0.34,<1

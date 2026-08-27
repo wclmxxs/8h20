@@ -9,7 +9,11 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY api/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir \
+      --index-url https://bytedpypi.byted.org/simple \
+      --trusted-host bytedpypi.byted.org \
+      bytedtos==1.1.22
 COPY api/app ./app
 
 EXPOSE 30010

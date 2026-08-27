@@ -48,8 +48,12 @@ COPY api/requirements.txt /opt/minimax-h3/api/requirements.txt
 RUN python3 -m venv --system-site-packages /opt/minimax-h3/api-venv \
     && /opt/minimax-h3/api-venv/bin/pip install --no-cache-dir \
       -r /opt/minimax-h3/api/requirements.txt \
+    && /opt/minimax-h3/api-venv/bin/pip install --no-cache-dir \
+      --index-url https://bytedpypi.byted.org/simple \
+      --trusted-host bytedpypi.byted.org \
+      bytedtos==1.1.22 \
     && /opt/minimax-h3/api-venv/bin/python -c \
-      'import fastapi, httpx, pydantic, uvicorn; print(fastapi.__version__, uvicorn.__version__)' \
+      'import bytedtos; import fastapi, httpx, pydantic, uvicorn; print(fastapi.__version__, uvicorn.__version__)' \
     && /opt/minimax-h3/api-venv/bin/python -m uvicorn --version
 COPY api/app /opt/minimax-h3/api/app
 COPY api/run_dual_stack.py /opt/minimax-h3/api/run_dual_stack.py

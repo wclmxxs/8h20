@@ -12,13 +12,11 @@ from urllib.parse import quote
 class TosConfig:
     bucket: str
     access_key: str
-    secret_key: str
     key_prefix: str
     public_base_url: str
     service_name: str
     idc: str
     cluster: str
-    addr_family: str
 
     @classmethod
     def from_env(cls) -> TosConfig:
@@ -26,7 +24,6 @@ class TosConfig:
         return cls(
             bucket=bucket,
             access_key=os.getenv("TOS_ACCESS_KEY", "").strip(),
-            secret_key=os.getenv("TOS_SECRET_KEY", "").strip(),
             key_prefix=os.getenv(
                 "TOS_KEY_PREFIX", "minimax_h3_data_cache/outputs"
             ).strip("/"),
@@ -35,9 +32,8 @@ class TosConfig:
                 f"https://tosv.byted.org/obj/{bucket}" if bucket else "",
             ).rstrip("/"),
             service_name=os.getenv("TOS_SERVICE_NAME", "toutiao.tos.tosapi").strip(),
-            idc=os.getenv("TOS_IDC", "").strip(),
+            idc=os.getenv("TOS_IDC", "sg1").strip(),
             cluster=os.getenv("TOS_CLUSTER", "default").strip(),
-            addr_family=os.getenv("TOS_ADDR_FAMILY", "dual-stack").strip(),
         )
 
     @property
@@ -45,9 +41,9 @@ class TosConfig:
         return bool(
             self.bucket
             and self.access_key
-            and self.secret_key
             and self.public_base_url
             and self.service_name
+            and self.idc
         )
 
     def object_key(self, task_id: str) -> str:
@@ -67,26 +63,21 @@ def describe() -> dict[str, Any]:
         "key_prefix": config.key_prefix or None,
         "service_name": config.service_name or None,
         "idc": config.idc or None,
-        "addr_family": config.addr_family or None,
     }
 
 
 @lru_cache(maxsize=4)
-def _filesystem(config: TosConfig):
-    import tosfsspec
+def _client(config: TosConfig):
+    import bytedtos
 
-    options: dict[str, Any] = {
-        "key": config.access_key,
-        "secret": config.secret_key,
-        "service_name": config.service_name,
-        "cluster": config.cluster,
-        "addr_family": config.addr_family,
-        "enable_crc": True,
-        "max_retry_count": 5,
-    }
-    if config.idc:
-        options["idc"] = config.idc
-    return tosfsspec.TosFileSystem(**options)
+    # Match cloud_edit_plugins/vllm_omni, which owns the same Singapore bucket.
+    return bytedtos.Client(
+        config.bucket,
+        config.access_key,
+        service=config.service_name,
+        cluster=config.cluster,
+        idc=config.idc,
+    )
 
 
 def publish_file(path: Path, task_id: str) -> dict[str, Any]:
@@ -97,11 +88,10 @@ def publish_file(path: Path, task_id: str) -> dict[str, Any]:
     size = path.stat().st_size
     if size <= 0:
         raise RuntimeError("refusing to upload an empty video")
-    _filesystem(config).put_file(
-        str(path),
-        f"tos://{config.bucket}/{object_key}",
-        ContentType="video/mp4",
-    )
+    with path.open("rb") as content:
+        response = _client(config).put_object(object_key, content)
+    if not 200 <= response.status_code < 300:
+        raise RuntimeError(f"TOS upload returned HTTP {response.status_code}")
     return {
         "provider": "tos",
         "bucket": config.bucket,
