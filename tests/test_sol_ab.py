@@ -30,10 +30,14 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     static_lora_patch = (
         ROOT / "patches/minimax-h3-static-lora-before-fp8.patch"
     ).read_text()
+    compile_ulysses_patch = (
+        ROOT / "patches/minimax-h3-compile-ulysses-eager.patch"
+    ).read_text()
 
     assert "minimax-h3-request-optimization.patch" in dockerfile
     assert "minimax-h3-temporal-dense-prefix.patch" in dockerfile
     assert "minimax-h3-static-lora-before-fp8.patch" in dockerfile
+    assert "minimax-h3-compile-ulysses-eager.patch" in dockerfile
     assert "minimax_h3_optimization" in patch
     assert "request_sol_attn_config" in patch
     assert "max_continuous_cached_steps" in patch
@@ -50,6 +54,9 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert "SGLANG_DIFFUSION_LORA_BEFORE_FP8" in static_lora_patch
     assert "process_weights_after_loading(layer)" in static_lora_patch
     assert "startup LoRA must be fully merged before FP8" in static_lora_patch
+    assert "torch.compiler.disable" in compile_ulysses_patch
+    assert "_minimax_h3_attention_core_eager" in compile_ulysses_patch
+    assert "c10d functional" in compile_ulysses_patch
 
 
 def test_optimization_toggle_reinstalls_the_single_worker():
@@ -82,6 +89,8 @@ def test_sol_stack_verifier_fails_closed_on_all_three_optimizations():
     assert "f\"--lora-merge-mode {os.environ['LORA_MERGE_MODE']}\"" in script
     assert "import cache_dit" in script
     assert "Fp8Config.get_name()" in script
+    assert "Synthetic server warmup failed" in script
+    assert "NCCL Error" in script
 
 
 def test_install_preserves_tuned_defaults_and_migrates_the_h200_identity():

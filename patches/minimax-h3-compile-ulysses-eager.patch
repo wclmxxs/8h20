@@ -1,0 +1,29 @@
+diff --git a/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py b/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
+index 15346d4d43..d6e45df3bc 100644
+--- a/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
++++ b/python/sglang/multimodal_gen/runtime/models/dits/minimax_h3.py
+@@ -508,2 +508,15 @@ def _minimax_h3_attention_core_impl(
++# Keep Ulysses/Ring collectives out of Inductor. Compiling c10d functional
++# all-to-all into the DiT graph can surface as an NCCL "unhandled cuda error"
++# on 8-way Ulysses even though the same collective is valid in eager mode.
++# The surrounding projections, normalization, residuals, and MLPs remain
++# compiled; only the dynamic attention kernel and its collectives graph-break.
++_minimax_h3_attention_core_eager = torch.compiler.disable(
++    _minimax_h3_attention_core_impl
++)
++_minimax_h3_attention_core_bcg = eager_on_graph(True)(
++    _minimax_h3_attention_core_eager
++)
++
++
+ class MiniMaxH3Attention(nn.Module):
+     def __init__(
+@@ -685,7 +698,7 @@ class MiniMaxH3Attention(nn.Module):
+         attention_core = (
+             _minimax_h3_attention_core_bcg
+             if self.bcg_breakpoint
+-            else _minimax_h3_attention_core_impl
++            else _minimax_h3_attention_core_eager
+         )
+         out = attention_core(
+             self,

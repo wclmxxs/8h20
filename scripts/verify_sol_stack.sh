@@ -103,5 +103,10 @@ if grep -Fq 'Could not merge layer' <<<"${worker_logs}"; then
   echo "${container}: at least one startup LoRA layer failed to merge" >&2
   exit 1
 fi
+if grep -Fq 'Synthetic server warmup failed' <<<"${worker_logs}" || \
+   grep -Fq 'NCCL Error' <<<"${worker_logs}"; then
+  echo "${container}: torch.compile warmup failed in distributed execution" >&2
+  exit 1
+fi
 
 echo "OPTIMIZATION_STACK_VERIFIED: Sol-Attn + static-LoRA-before-FP8 + torch.compile + Cache-DiT (${SOL_CACHE_DIT_WARMUP}/${SOL_CACHE_DIT_RDT}/${SOL_CACHE_DIT_MC})"
