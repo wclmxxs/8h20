@@ -1,0 +1,149 @@
+diff --git a/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py b/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
+--- a/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
++++ b/python/sglang/multimodal_gen/runtime/layers/attention/backends/sol_attn.py
+@@ -26,17 +26,105 @@ _REQUEST_SOL_ATTN_CONFIG: ContextVar[dict[str, Any] | None] = ContextVar(
+     "request_sol_attn_config",
+     default=None,
+ )
++_REQUEST_SOL_ATTN_STATS: ContextVar[dict[str, Any] | None] = ContextVar(
++    "request_sol_attn_stats",
++    default=None,
++)
+ 
+ 
++def _is_primary_distributed_rank() -> bool:
++    return (
++        not torch.distributed.is_available()
++        or not torch.distributed.is_initialized()
++        or torch.distributed.get_rank() == 0
++    )
++
++
++def _current_denoising_step() -> int | None:
++    try:
++        from sglang.multimodal_gen.runtime.managers.forward_context import (
++            get_forward_context,
++        )
++
++        return int(get_forward_context().current_timestep)
++    except AssertionError:
++        return None
++
++
++def _record_sol_attn_path(*, dense: bool, layer_idx: int | None) -> None:
++    """Collect CPU-only request diagnostics without synchronizing CUDA."""
++
++    stats = _REQUEST_SOL_ATTN_STATS.get()
++    if stats is None:
++        return
++    path = "dense" if dense else "sol"
++    stats[f"{path}_calls"] += 1
++    layer_calls = stats[f"{path}_layers"]
++    layer_calls[layer_idx] = layer_calls.get(layer_idx, 0) + 1
++    step = _current_denoising_step()
++    step_calls = stats["steps"].setdefault(step, {"dense": 0, "sol": 0})
++    step_calls[path] += 1
++    cfg = _get_sol_attn_runtime_config()
++    stats["runtime_configs"].add(
++        (
++            cfg["enabled"],
++            cfg["force_dense"],
++            cfg["tau"],
++            cfg["dense_steps"],
++            cfg["sink_start"],
++            cfg["sink_tokens"],
++            cfg["dense_prefix_rows"],
++        )
++    )
++
++
+ @contextmanager
+ def request_sol_attn_config(config: dict[str, Any] | None) -> Iterator[None]:
+     """Apply normalized Sol-Attn overrides for one worker batch."""
+ 
+-    token = _REQUEST_SOL_ATTN_CONFIG.set(config)
++    stats: dict[str, Any] = {
++        "dense_calls": 0,
++        "sol_calls": 0,
++        "dense_layers": {},
++        "sol_layers": {},
++        "steps": {},
++        "runtime_configs": set(),
++    }
++    config_token = _REQUEST_SOL_ATTN_CONFIG.set(config)
++    stats_token = _REQUEST_SOL_ATTN_STATS.set(stats)
+     try:
+         yield
+     finally:
+-        _REQUEST_SOL_ATTN_CONFIG.reset(token)
++        if _is_primary_distributed_rank():
++            logger.info(
++                "[MiniMaxH3SolAttn] request_config=%s dense_calls=%d "
++                "sol_calls=%d dense_layers=%s sol_layers=%s steps=%s "
++                "runtime_configs=%s",
++                config,
++                stats["dense_calls"],
++                stats["sol_calls"],
++                dict(
++                    sorted(
++                        stats["dense_layers"].items(),
++                        key=lambda item: str(item[0]),
++                    )
++                ),
++                dict(
++                    sorted(
++                        stats["sol_layers"].items(),
++                        key=lambda item: str(item[0]),
++                    )
++                ),
++                dict(
++                    sorted(
++                        stats["steps"].items(),
++                        key=lambda item: str(item[0]),
++                    )
++                ),
++                sorted(stats["runtime_configs"], key=str),
++            )
++        _REQUEST_SOL_ATTN_STATS.reset(stats_token)
++        _REQUEST_SOL_ATTN_CONFIG.reset(config_token)
+ 
+ 
+ def _parse_layer_ranges(spec: str | int | None) -> frozenset[int]:
+@@ -148,13 +236,8 @@ class SolAttnImpl(AttentionImpl):
+         cfg = _get_sol_attn_runtime_config()
+         if not cfg["enabled"] or cfg["force_dense"]:
+             return True
+-        try:
+-            from sglang.multimodal_gen.runtime.managers.forward_context import (
+-                get_forward_context,
+-            )
+-
+-            step = int(get_forward_context().current_timestep)
+-        except AssertionError:
++        step = _current_denoising_step()
++        if step is None:
+             step = 0
+         if step < cfg["dense_steps"]:
+             return True
+@@ -253,7 +336,9 @@ class SolAttnImpl(AttentionImpl):
+         attn_metadata: AttentionMetadata,
+     ) -> torch.Tensor:
+         del attn_metadata
+-        if self._should_use_dense():
++        use_dense = self._should_use_dense()
++        _record_sol_attn_path(dense=use_dense, layer_idx=self.layer_idx)
++        if use_dense:
+             q = query.transpose(1, 2).reshape(
+                 query.shape[0] * query.shape[1], query.shape[2], query.shape[3]
+             )
+@@ -299,7 +384,9 @@ class SolAttnImpl(AttentionImpl):
+         cu_seqlens_host: tuple[int, ...] | None = None,
+     ) -> torch.Tensor:
+         del cu_seqlens_host
+-        if self._should_use_dense():
++        use_dense = self._should_use_dense()
++        _record_sol_attn_path(dense=use_dense, layer_idx=self.layer_idx)
++        if use_dense:
+             return self._dense_varlen(
+                 query,
+                 key,

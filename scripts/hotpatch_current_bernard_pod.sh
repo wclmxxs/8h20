@@ -98,20 +98,25 @@ stop_services() {
 }
 
 apply_runtime_patch() {
-  local runtime_source backup cache_dit_patch
+  local runtime_source backup runtime_patch
+  local -a runtime_patches=(
+    "${repo_root}/patches/minimax-h3-cache-dit-residual-preservation.patch"
+    "${repo_root}/patches/minimax-h3-sol-attn-path-observability.patch"
+  )
 
   [[ -d ${runtime_root} ]] || die "missing SGLang workspace: ${runtime_root}"
   cd "${runtime_root}"
-  cache_dit_patch=${repo_root}/patches/minimax-h3-cache-dit-residual-preservation.patch
-  [[ -f ${cache_dit_patch} ]] || die "missing Cache-DiT patch: ${cache_dit_patch}"
-  if git apply -p1 --check "${cache_dit_patch}"; then
-    git apply -p1 "${cache_dit_patch}"
-    echo "Applied MiniMax-H3 Cache-DiT residual preservation patch."
-  elif git apply -p1 --reverse --check "${cache_dit_patch}"; then
-    echo "MiniMax-H3 Cache-DiT residual preservation patch already present."
-  else
-    die "Cache-DiT patch does not match the active SGLang runtime"
-  fi
+  for runtime_patch in "${runtime_patches[@]}"; do
+    [[ -f ${runtime_patch} ]] || die "missing runtime patch: ${runtime_patch}"
+    if git apply -p1 --check "${runtime_patch}"; then
+      git apply -p1 "${runtime_patch}"
+      echo "Applied runtime patch: $(basename "${runtime_patch}")"
+    elif git apply -p1 --reverse --check "${runtime_patch}"; then
+      echo "Runtime patch already present: $(basename "${runtime_patch}")"
+    else
+      die "runtime patch does not match the active SGLang tree: ${runtime_patch}"
+    fi
+  done
   runtime_source=$(
     python3 - <<'PY'
 import inspect

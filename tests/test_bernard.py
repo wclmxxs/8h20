@@ -17,6 +17,7 @@ def test_bernard_image_is_self_contained_and_preserves_all_patches():
         "minimax-h3-static-lora-before-fp8.patch",
         "minimax-h3-compile-ulysses-eager.patch",
         "minimax-h3-cache-dit-residual-preservation.patch",
+        "minimax-h3-sol-attn-path-observability.patch",
     ):
         assert patch in dockerfile
     assert "TORCH_CUDA_ARCH_LIST=9.0" in dockerfile

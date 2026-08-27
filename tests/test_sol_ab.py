@@ -36,12 +36,16 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     cache_dit_patch = (
         ROOT / "patches/minimax-h3-cache-dit-residual-preservation.patch"
     ).read_text()
+    observability_patch = (
+        ROOT / "patches/minimax-h3-sol-attn-path-observability.patch"
+    ).read_text()
 
     assert "minimax-h3-request-optimization.patch" in dockerfile
     assert "minimax-h3-temporal-dense-prefix.patch" in dockerfile
     assert "minimax-h3-static-lora-before-fp8.patch" in dockerfile
     assert "minimax-h3-compile-ulysses-eager.patch" in dockerfile
     assert "minimax-h3-cache-dit-residual-preservation.patch" in dockerfile
+    assert "minimax-h3-sol-attn-path-observability.patch" in dockerfile
     assert "minimax_h3_optimization" in patch
     assert "request_sol_attn_config" in patch
     assert "max_continuous_cached_steps" in patch
@@ -68,6 +72,10 @@ def test_request_optimization_patch_is_applied_to_sglang_image():
     assert "set_cache_dit_input_preservation" in cache_dit_patch
     assert "allow_inplace=not self.preserve_input_for_cache_dit" in cache_dit_patch
     assert "indexed_gate_bf16(torch.empty_like(x)" in cache_dit_patch
+    assert "[MiniMaxH3SolAttn]" in observability_patch
+    assert "dense_calls" in observability_patch
+    assert "sol_calls" in observability_patch
+    assert "runtime_configs" in observability_patch
 
 
 def test_optimization_toggle_reinstalls_the_single_worker():
@@ -84,6 +92,7 @@ def test_current_pod_hotpatch_reuses_the_localized_model_and_restarts_workers():
     assert "_minimax_h3_sp_all_gather_compiler_eager" in script
     assert "eager_on_graph(True)" in script
     assert "minimax-h3-cache-dit-residual-preservation.patch" in script
+    assert "minimax-h3-sol-attn-path-observability.patch" in script
     assert "git apply -p1" in script
     assert "debug_hold.py" in script
     assert "process_is_live" in script
